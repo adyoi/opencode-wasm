@@ -90,6 +90,18 @@
         return text.length > n ? `${text.slice(0, n)}…` : text
       }
 
+      /** Turn transport/CORS noise into something a person can act on. */
+      function explain(err) {
+        const message = err?.message ?? String(err)
+        if (/Failed to fetch|Transport: Failed to fetch|NetworkError|Load failed/i.test(message)) {
+          const cors = location.protocol === "https:" && !location.host.includes("127.0.0.1")
+            ? `opencode serve --port 4096 --cors ${location.origin}`
+            : "opencode serve --port 4096"
+          return `Tidak bisa menghubungi server.\nCoba cek: (1) opencode serve masih jalan, (2) portnya benar, (3) origin halaman ini ada di --cors.\ncontoh: ${cors}`
+        }
+        return message
+      }
+
       function system(text) {
         add("system", text)
       }
@@ -508,7 +520,7 @@
           if (document.body.classList.contains("shell")) await startShell()        } catch (err) {
           setConnected(false, "gagal", "err")
           console.error("[opencode-wasm] connect failed", err)
-          add("error", err?.message ?? String(err))
+          add("error", explain(err))
         }
       }
 
@@ -540,10 +552,19 @@
         $("url").onkeydown = (e) => e.key === "Enter" && connect()
 
         // Pages is HTTPS, so a plain ws:// PTY socket is blocked as mixed content.
-        if (location.protocol === "https:" && saved.startsWith("http://")) {
-          $("connectHint").innerHTML =
-            "Halaman ini HTTPS dan server-nya <code>http://</code>. Chromium mengizinkan ini untuk <code>localhost</code>; browser lain bisa lebih ketat — siapkan <code>wss://</code> kalau shell tidak mau tersambung."
+        const hints = []
+        const servedLocally = ["localhost", "127.0.0.1", ""].includes(location.hostname)
+        if (!servedLocally && /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])/.test(saved)) {
+          hints.push(
+            `Halaman ini dibuka dari <code>${location.hostname}</code>, jadi <code>127.0.0.1</code> menunjuk ke komputer ini — bukan ke mesin tempat server berjalan. Buka dari komputer yang sama, atau isi URL server yang bisa dijangkau (mis. <code>?server=http://192.168.1.10:4096</code>).`,
+          )
         }
+        if (location.protocol === "https:" && saved.startsWith("http://")) {
+          hints.push(
+            "Halaman ini HTTPS dan server-nya <code>http://</code>. Chromium mengizinkan ini untuk <code>localhost</code>; browser lain bisa lebih ketat — siapkan <code>wss://</code> kalau shell tidak mau tersambung.",
+          )
+        }
+        if (hints.length) $("connectHint").innerHTML = hints.join("<br><br>")
       }
 
       async function send() {
