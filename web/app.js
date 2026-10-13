@@ -421,14 +421,15 @@
 
         // The full models.dev catalogue can run into thousands of entries, so
         // show the free ones plus the curated provider, capped for the DOM.
+        // Models the server flags as deprecated are hidden by default.
         const curated = list.filter((m) => m.providerID === "opencode")
-        const usable = [...new Map([...list.filter(isFree), ...curated].map((m) => [`${m.providerID}/${m.id}`, m])).values()].slice(0, 250)
+        const usable = [...new Map([...list.filter(isFree), ...curated].map((m) => [`${m.providerID}/${m.id}`, m])).values()]
+          .filter((m) => !isDeprecated(m))
+          .slice(0, 250)
 
         const sorted = [...usable].sort((a, b) => {
           const free = Number(isFree(b)) - Number(isFree(a))
-          if (free !== 0) return free
-          const dead = Number(isDeprecated(a)) - Number(isDeprecated(b))
-          return dead !== 0 ? dead : a.id.localeCompare(b.id)
+          return free !== 0 ? free : a.id.localeCompare(b.id)
         })
 
         const groups = new Map()
@@ -445,10 +446,7 @@
           for (const model of items) {
             const option = document.createElement("option")
             option.value = `${model.providerID}/${model.id}`
-            const tags = []
-            if (isFree(model)) tags.push("free")
-            if (isDeprecated(model)) tags.push("deprecated")
-            option.textContent = model.name + (tags.length ? ` · ${tags.join(" · ")}` : "")
+            option.textContent = isFree(model) ? `${model.name} · free` : model.name
             group.appendChild(option)
           }
           picker.appendChild(group)
@@ -456,6 +454,7 @@
         picker.title = `${models.size} dari ${list.length} model`
 
         const saved = localStorage.getItem("opencode-model")
+        // A previously chosen model may have become deprecated; fall back cleanly.
         if (saved && models.has(saved)) picker.value = saved
         if (!picker.value) picker.value = picker.options[0]?.value ?? ""
         return picker.value
