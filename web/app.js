@@ -729,7 +729,13 @@
       const PROBE_TIMEOUT = 1500
       const PROBE_PORTS = [4096]
 
-      /** Does something answer `/global/health` at this address? */
+      /**
+       * Is there an opencode server at this address?
+       *
+       * A 401 still counts as "the server is there" — that is exactly the state a
+       * password-protected server is in, and treating it as "nothing here" would
+       * hide the server from the auto-detect. Only a failed request means absent.
+       */
       async function probe(baseUrl) {
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT)
@@ -737,11 +743,13 @@
           const res = await fetch(`${baseUrl.replace(/\/$/, "")}/global/health`, {
             signal: controller.signal,
           })
-          if (!res.ok) return false
+          if (res.status === 401 || res.status === 403) return { ok: true, needsAuth: true }
+          if (!res.ok) return { ok: false, needsAuth: false }
           const body = await res.json().catch(() => null)
-          return body?.healthy === true || body?.healthy === "true"
+          const healthy = body?.healthy === true || body?.healthy === "true"
+          return { ok: healthy, needsAuth: false }
         } catch {
-          return false
+          return { ok: false, needsAuth: false }
         } finally {
           clearTimeout(timer)
         }
@@ -779,8 +787,8 @@
       /** Probe every candidate at once and return the first that answers. */
       async function discover() {
         const candidates = candidateServers()
-        const results = await Promise.all(candidates.map(async (url) => ({ url, ok: await probe(url) })))
-        return results.find((r) => r.ok)?.url ?? null
+        const results = await Promise.all(candidates.map(async (url) => ({ url, ...(await probe(url)) })))
+        return results.find((r) => r.ok) ?? null
       }
 
       /**
@@ -812,11 +820,21 @@
           return null
         }
 
-        field.value = found
-        if (connected) return found
+        field.value = found.url
+        if (found.needsAuth) {
+          // A 401 is a server, just not an open one. Show the card and let the
+          // visitor supply the password instead of failing the connection.
+          if (!connected) setConnected(false, "butuh password", "")
+          showConnectCard(
+            `Server ditemukan di <code>${found.url}</code>, tapi ia memakai password. Isi kolom di bawah lalu tekan <b>Sambung</b>.`,
+          )
+          return found.url
+        }
+
+        if (connected) return found.url
         await connect()
-        if (!fromQuery) system(`server ditemukan otomatis di ${found}`)
-        return found
+        if (!fromQuery) system(`server ditemukan otomatis di ${found.url}`)
+        return found.url
       }
 
       async function send() {

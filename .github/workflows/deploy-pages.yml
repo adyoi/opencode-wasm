@@ -1,17 +1,15 @@
-name: Deploy Pages (artifact)
+name: Deploy Pages
 
-# Optional alternative to publishing the repository as-is:
-# switch Settings -> Pages -> Source to "GitHub Actions" after the first run.
+# Builds the site and publishes it to GitHub Pages.
 #
-# The artifact mirrors the repository layout (root redirect + web/ + dist/)
-# on purpose. GitHub also runs a managed workflow called
-# "pages-build-deployment" that cannot be disabled (HTTP 422) and publishes the
-# branch, so both deployments can race. With identical layouts the winner does
-# not matter and visitors always land on the demo.
-#
-# Triggered manually so it does not duplicate the Build & test workflow.
+# Pages source is "GitHub Actions" (see Settings -> Pages), so this workflow is
+# what actually serves adyoi.github.io/opencode-wasm. Every push to main
+# rebuilds from source and redeploys, so the committed build output is no longer
+# what visitors get — it only serves as a fallback and for `npm run serve`.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -19,9 +17,10 @@ permissions:
   pages: write
   id-token: write
 
+# Never cancel a deploy midway: a half-published site is worse than a late one.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -48,10 +47,20 @@ jobs:
 
       - run: npm ci
 
-      - name: Build
+      - name: Build (runtime + terminal + wasm + standalone)
         run: npm run build
 
-      - name: Compose the site (same shape as the repository)
+      - name: Rust tests
+        run: cargo test --manifest-path rust/Cargo.toml
+
+      - name: Verify the wasm boots and carries the runtime
+        run: |
+          rm -f web/pkg/.gitignore
+          node scripts/verify-build.mjs
+
+      - name: Compose the site
+        # Same shape as the repository: root redirect, the web/ app, and the
+        # single-file build. .nojekyll keeps Pages from filtering the wasm.
         run: |
           rm -f web/pkg/.gitignore
           mkdir -p _site
@@ -62,6 +71,7 @@ jobs:
           touch _site/.nojekyll
 
       - uses: actions/configure-pages@v5
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
