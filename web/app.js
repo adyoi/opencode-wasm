@@ -100,7 +100,16 @@
           const cors = location.protocol === "https:" && !location.host.includes("127.0.0.1")
             ? `opencode serve --port 4096 --cors ${location.origin}`
             : "opencode serve --port 4096"
-          return `Tidak bisa menghubungi server.\nCoba cek: (1) opencode serve masih jalan, (2) portnya benar, (3) origin halaman ini ada di --cors.\ncontoh: ${cors}`
+          const remote = location.hostname && !["localhost", "127.0.0.1", ""].includes(location.hostname)
+          return [
+            "Tidak bisa menghubungi server.",
+            "Coba cek: (1) opencode serve masih jalan, (2) portnya benar, (3) origin halaman ini ada di --cors.",
+            `contoh: ${cors}`,
+            "Kalau browser meminta izin jaringan lokal untuk situs ini, setujui dulu (ikon kunci di address bar).",
+            remote ? `Catatan: halaman dibuka dari ${location.hostname}, jadi 127.0.0.1 menunjuk ke perangkat ini. Dari perangkat lain, pakai IP LAN.` : "",
+          ]
+            .filter(Boolean)
+            .join("\n")
         }
         return message
       }
