@@ -377,7 +377,7 @@
           terminal.writeln(
             "\r\n\x1b[31msocket shell ditolak.\x1b[0m " +
               (location.protocol === "https:"
-                ? "Halaman HTTPS tidak boleh membuka ws:// (mixed content). Pakai server lewat wss://, mis. cloudflared atau ngrok."
+                ? "Browser mungkin memblokir ws:// dari halaman HTTPS. Arahkan server lewat wss:// (mis. cloudflared atau ngrok), atau buka halamannya lewat http://."
                 : "Coba tombol Mulai ulang."),
           )
           return
@@ -537,7 +537,7 @@
         // Pages is HTTPS, so a plain ws:// PTY socket is blocked as mixed content.
         if (location.protocol === "https:" && saved.startsWith("http://")) {
           $("connectHint").innerHTML =
-            "Halaman ini HTTPS dan server-nya <code>http://</code>. Chat tetap jalan, tapi shell butuh <code>wss://</code> (mis. lewat tunnel) — lihat README."
+            "Halaman ini HTTPS dan server-nya <code>http://</code>. Chromium mengizinkan ini untuk <code>localhost</code>; browser lain bisa lebih ketat — siapkan <code>wss://</code> kalau shell tidak mau tersambung."
         }
       }
 

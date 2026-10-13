@@ -75,11 +75,13 @@ Yang bisa dari halaman HTTPS GitHub Pages:
 
 | Fitur | Status | Catatan |
 | --- | --- | --- |
-| Chat, model, izin, tool web | ✅ jalan | `fetch` ke `http://127.0.0.1` diizinkan karena localhost termasuk *potentially trustworthy origin* |
-| Panel Web | ✅ jalan | iframe biasa |
-| Shell / PTY | ⚠️ butuh `wss://` | browser **memblokir** `ws://` dari halaman HTTPS (mixed content, diwajibkan spesifikasi; localhost tidak dikecualikan) |
+| Chat, model, auto-allow, tool web | ✅ | `fetch` ke `http://127.0.0.1` diizinkan karena localhost termasuk *potentially trustworthy origin* |
+| Panel Web | ✅ | iframe biasa |
+| Shell / PTY | ✅ di Chromium | `ws://` ke `127.0.0.1` **terverifikasi jalan** dari halaman Pages (hasil uji di bawah). Browser lain bisa lebih ketat; `wss://` selalu aman |
 
-Jadi supaya shell juga jalan dari Pages, arahkan server lewat TLS:
+Artinya untuk pemakaian sendiri: **Pages + `opencode serve` lokal sudah cukup untuk semua
+fitur**, tanpa tunnel. Kalau nanti perlu diakses dari mesin lain atau browser yang lebih
+ketat, arahkan server lewat TLS:
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:4096     # atau ngrok http 4096
@@ -92,6 +94,23 @@ https://adyoi.github.io/opencode-wasm/?server=https://<tunnel-url>
 ```
 
 Query `?server=` dipakai untuk mengarahkan halaman ke server tertentu (disimpan di `localStorage`).
+
+### Hasil uji dari Pages (bukan localhost)
+
+Diverifikasi langsung di `https://adyoi.github.io/opencode-wasm/` dengan server lokal yang
+diizinkan lewat `--cors https://adyoi.github.io`:
+
+```
+runtime tertanam 36.0 KiB · isSecureContext = true
+tersambung · 39 dari 39 model · opencode/space-bunny-free
+prompt  → "Balas persis dengan tiga kata: pages live ok"
+answer  → pages live ok
+shell   → PowerShell 7.6.6 di dalam xterm.js
+        → `hostname` dijawab `runnervmfi6oq`
+```
+
+Jadi `ws://127.0.0.1` **tidak** diblokir mixed content oleh Chromium pada kasus ini — catatan
+ini menggantikan dugaan awal saya sebelumnya. Yang belum diuji: Firefox dan Safari.
 
 ### Dua hal yang perlu diperhatikan soal CORS
 
