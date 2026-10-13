@@ -1,0 +1,11 @@
+node_modules/
+rust/target/
+tools/
+
+# build output (rebuilt by CI and by `npm run build`)
+js/dist/
+web/pkg/
+web/vendor/
+dist/
+
+*.log

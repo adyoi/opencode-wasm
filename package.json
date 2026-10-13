@@ -1,0 +1,50 @@
+{
+  "name": "opencode-wasm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OpenCode agent runtime packaged into a single WebAssembly module",
+  "license": "MIT",
+  "keywords": [
+    "opencode",
+    "webassembly",
+    "wasm",
+    "wasm-pack",
+    "rust",
+    "agent",
+    "pty",
+    "xterm",
+    "esbuild",
+    "github-pages"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adyoi/opencode-wasm.git"
+  },
+  "homepage": "https://adyoi.github.io/opencode-wasm/",
+  "bugs": {
+    "url": "https://github.com/adyoi/opencode-wasm/issues"
+  },
+  "scripts": {
+    "build:js": "node js/build.mjs",
+    "build:terminal": "node js/build-terminal.mjs",
+    "build:standalone": "node js/build-standalone.mjs",
+    "build:wasm": "wasm-pack build rust --target web --out-dir ..\\web\\pkg --out-name opencode_wasm --release",
+    "build": "npm run build:js && npm run build:terminal && npm run build:wasm && npm run build:standalone",
+    "test": "cargo test --manifest-path rust/Cargo.toml",
+    "serve": "node scripts/serve.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "demo:config": "node scripts/config-demo.mjs",
+    "patch:version": "node scripts/patch-version.mjs",
+    "check:models": "node scripts/check-models.mjs",
+    "probe:pty": "node scripts/probe-pty.mjs",
+    "events": "node scripts/events.mjs",
+    "dev": "npm run build && npm run serve"
+  },
+  "dependencies": {
+    "@opencode/client": "^2.0.28",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "esbuild": "^0.25.0"
+  }
+}
