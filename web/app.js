@@ -412,6 +412,7 @@
       /* ---------- model picker ---------- */
 
       const isFree = (model) => (model.cost ?? []).every((c) => !c.input && !c.output && !c.cache?.read)
+      const isDeprecated = (model) => model.status === "deprecated"
 
       function fillModels(list) {
         const picker = $("model")
@@ -425,7 +426,9 @@
 
         const sorted = [...usable].sort((a, b) => {
           const free = Number(isFree(b)) - Number(isFree(a))
-          return free !== 0 ? free : a.id.localeCompare(b.id)
+          if (free !== 0) return free
+          const dead = Number(isDeprecated(a)) - Number(isDeprecated(b))
+          return dead !== 0 ? dead : a.id.localeCompare(b.id)
         })
 
         const groups = new Map()
@@ -442,7 +445,10 @@
           for (const model of items) {
             const option = document.createElement("option")
             option.value = `${model.providerID}/${model.id}`
-            option.textContent = isFree(model) ? `${model.name} · free` : model.name
+            const tags = []
+            if (isFree(model)) tags.push("free")
+            if (isDeprecated(model)) tags.push("deprecated")
+            option.textContent = model.name + (tags.length ? ` · ${tags.join(" · ")}` : "")
             group.appendChild(option)
           }
           picker.appendChild(group)

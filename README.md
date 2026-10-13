@@ -132,6 +132,39 @@ ini menggantikan dugaan awal saya sebelumnya. Yang belum diuji: Firefox dan Safa
 
 Deploy ke Pages aman untuk dipakai sendiri (server tetap di `127.0.0.1` milik komputer masing-masing pengunjung). Yang berbahaya adalah mengekspos server-nya, bukan halamannya.
 
+### Root atau `/docs`?
+
+Repo ini memakai **root**: `https://adyoi.github.io/opencode-wasm/`. Itu karena
+Pages di-build dari workflow Actions (`build_type=workflow`), sementara `/docs` hanya
+berlaku untuk mode lama "deploy from a branch". `/docs/` sendiri memang **404** sekarang.
+
+Semua path di aplikasi ini relatif (`./app.js`, `./pkg/…`, `./vendor/…`), jadi kalau
+seandainya kamu beralih ke mode `/docs`, yang perlu diubah hanya folder sumbernya —
+`web/` → `docs/`, dan `dist/opencode-standalone.html` → `docs/opencode-standalone.html`.
+Halaman standalone bisa dipindah ke URL mana pun tanpa build ulang.
+
+## Model gratis yang benar-benar jalan
+
+`npm run check:models` memprobe seluruh 39 model gratis satu per satu ke gateway.
+Hasilnya **12 ok · 27 gagal**:
+
+```
+big-pickle · cat-jam-free · ling-3.0-flash-free · ling-3.0-flash-fin-free
+ling-3.1-flash-free · longcat-2.5-preview-free · mimo-v2.6-flash-free
+muse-spark-1.2-contributor-free · muse-spark-1.3-contributor-free
+nemotron-3.5-lightning-free · space-bunny-free · step-5-preview-free
+```
+
+Tiga jenis kegagalan yang muncul: `410 ModelDeprecated` (dihapus gateway),
+`400 Upstream …` (ditolak atau rate-limit), dan satu `Invalid stream event`.
+
+> Field `status` dari `/api/model` **tidak bisa dipercaya** untuk memutuskan ini.
+> `exo-free` dan `nemotron-3-ultra-free` berstatus `active`, tapi live probe
+> mengembalikan 410 dan error stream. Sebaliknya `ling-3.0-flash-free` dan
+> `muse-spark-1.2-contributor-free` berstatus `deprecated` padahal masih jalan.
+> Karena itu picker menampilkan semuanya apa adanya, dengan label `free` dan
+> `deprecated` sebagai informasi saja — satu-satunya yang pasti adalah probe.
+
 ## Arsitektur
 
 ```
