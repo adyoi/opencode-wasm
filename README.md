@@ -188,6 +188,43 @@ Tiga jenis kegagalan yang muncul: `410 ModelDeprecated` (dihapus gateway),
 > Karena itu picker menampilkan semuanya apa adanya, dengan label `free` dan
 > `deprecated` sebagai informasi saja — satu-satunya yang pasti adalah probe.
 
+## Menjalankan server di Codespaces
+
+`.devcontainer/` sudah disiapkan supaya Codespaces langsung jadi host server, sehingga
+halaman GitHub Pages bisa diakses dari perangkat mana pun:
+
+```
+https://adyoi.github.io/opencode-wasm/web/?server=https://<nama-codespace>-4096.app.github.dev
+```
+
+Langkah:
+
+1. Codespaces → New codespace di repo ini. `postCreateCommand` menjalankan
+   `.devcontainer/setup.sh`: pasang opencode, patch versi, tulis config.
+2. Jalankan servernya (dicetak di akhir setup):
+   ```bash
+   tools/opencode-dev/node_modules/opencode-ai/bin/opencode serve \
+     --hostname 0.0.0.0 --port 4096 --cors https://adyoi.github.io
+   ```
+3. Di panel **PORTS**, set port 4096 visibility ke **Public**.
+4. Buka URL forwarded dengan `?server=`.
+
+Semua jadi HTTPS, jadi tidak ada localhost dan tidak ada mixed content.
+
+### Password, dan batasannya
+
+`OPENCODE_SERVER_PASSWORD` mengaktifkan HTTP basic auth (user default `opencode`).
+Kartu connect punya kolom kredensial, dan **semua** panggilan API — termasuk prompt,
+izin, dan pembuatan PTY — mengirim header `Authorization`.
+
+Satu batas yang tidak bisa dilewati: **WebSocket PTY tidak bisa mengirim header dari
+browser.** Jadi dengan server ber-password, chat berjalan normal tetapi tab Shell
+menolak dengan penjelasan eksplisit. Kalau shell dibutuhkan, jalankan server tanpa
+password (port privat) atau taruh reverse proxy yang menyisipkan header.
+
+> _Codespace dengan port publik + `permission: "allow"` berarti shell publik. Pakai
+> Codespaces untuk demo pribadi, jangan untuk agent yang menyentuh data sensitif.
+
 ## Arsitektur
 
 ```

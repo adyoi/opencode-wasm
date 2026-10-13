@@ -93,6 +93,9 @@
       /** Turn transport/CORS noise into something a person can act on. */
       function explain(err) {
         const message = err?.message ?? String(err)
+        if (/UnauthorizedError|Authentication required|\b401\b/i.test(message)) {
+          return "Server minta autentikasi. Isi kolom password di kartu Sambung (user default: opencode)."
+        }
         if (/Failed to fetch|Transport: Failed to fetch|NetworkError|Load failed/i.test(message)) {
           const cors = location.protocol === "https:" && !location.host.includes("127.0.0.1")
             ? `opencode serve --port 4096 --cors ${location.origin}`
@@ -363,39 +366,49 @@
       }
 
       async function startShell() {
-        if (!connected) return
         const terminal = await ensureTerminal()
         shellStatus("memulai…", "")
 
-        if (ptyID) await call("ptyClose", { ptyID }).catch(() => null)
-
-        const kind = $("shellKind").value
-        const input = { title: "opencode-wasm shell", args: [] }
-        if (kind) input.command = kind
-        const cwd = $("shellCwd").value.trim()
-        if (cwd) input.cwd = cwd
-
-        const created = await call("ptyCreate", input)
-        ptyID = created?.ptyID
-        if (!ptyID) {
+        const fail = (message) => {
           shellStatus("gagal", "err")
-          terminal.writeln(`\r\n\x1b[31mgagal membuat shell: ${JSON.stringify(created)}\x1b[0m`)
-          return
+          terminal.writeln(`\r\n\x1b[31mshell gagal.\x1b[0m ${message}`)
         }
 
-        const attached = await call("ptyConnect", { ptyID })
-        if (attached?.ok === false) {
-          shellStatus("gagal", "err")
-          terminal.writeln(
-            "\r\n\x1b[31msocket shell ditolak.\x1b[0m " +
-              (location.protocol === "https:"
+        try {
+          if (ptyID) await call("ptyClose", { ptyID }).catch(() => null)
+
+          const kind = $("shellKind").value
+          const input = { title: "opencode-wasm shell", args: [] }
+          if (kind) input.command = kind
+          const cwd = $("shellCwd").value.trim()
+          if (cwd) input.cwd = cwd
+
+          const created = await call("ptyCreate", input)
+          ptyID = created?.ptyID
+          if (!ptyID) {
+            fail(`server tidak mengembalikan PTY: ${JSON.stringify(created)}`)
+            return
+          }
+
+          const attached = await call("ptyConnect", { ptyID })
+          if (attached?.ok === false) {
+            fail(
+              location.protocol === "https:"
                 ? "Browser mungkin memblokir ws:// dari halaman HTTPS. Arahkan server lewat wss:// (mis. cloudflared atau ngrok), atau buka halamannya lewat http://."
-                : "Coba tombol Mulai ulang."),
-          )
-          return
+                : "Coba tombol Mulai ulang.",
+            )
+            return
+          }
+          shellStatus(`shell ${ptyID.slice(0, 10)}…`, "on")
+          terminal.focus()
+        } catch (err) {
+          const message = String(err?.message ?? err)
+          if (/AUTH_WS_UNSUPPORTED/.test(message)) {
+            fail("Server memakai password. Browser tidak bisa mengirim header Authorization ke WebSocket, jadi shell tidak bisa — butuh server tanpa password, atau reverse proxy yang menyisipkan header.")
+          } else {
+            fail(explain(err))
+          }
         }
-        shellStatus(`shell ${ptyID.slice(0, 10)}…`, "on")
-        terminal.focus()
       }
 
       /* ---------- state ---------- */
@@ -496,12 +509,24 @@
         await call("subscribe", {})
       }
 
+      const CRED_KEY = "opencode-credentials"
+
+      const basicHeader = (username, password) =>
+        `Basic ${btoa(`${username || "opencode"}:${password}`)}`
+
       async function connect() {
         const url = $("url").value.trim() || "http://127.0.0.1:4096"
         localStorage.setItem(SERVER_KEY, url)
+
+        const username = $("user").value.trim()
+        const password = $("pass").value
+        const headers = password ? { Authorization: basicHeader(username, password) } : {}
+        if (password) localStorage.setItem(CRED_KEY, JSON.stringify({ username, password }))
+        else localStorage.removeItem(CRED_KEY)
+
         setConnected(false, "menyambung…", "")
         try {
-          await call("open", { baseUrl: url })
+          await call("open", { baseUrl: url, headers })
           const list = (await call("models"))?.data ?? []
           fillModels(list)
 
@@ -546,10 +571,22 @@
               <input id="url" value="${saved.replace(/"/g, "&quot;")}" spellcheck="false" />
               <button id="connect" class="primary">Sambung</button>
             </div>
+            <div class="row creds">
+              <input id="user" placeholder="pengguna (default: opencode)" autocomplete="username" />
+              <input id="pass" type="password" placeholder="password server (kalau ada)" autocomplete="current-password" />
+            </div>
             <p class="hint" id="connectHint"></p>
           </div>`
         $("connect").onclick = connect
         $("url").onkeydown = (e) => e.key === "Enter" && connect()
+
+        try {
+          const saved2 = JSON.parse(localStorage.getItem(CRED_KEY) ?? "null")
+          if (saved2) {
+            $("user").value = saved2.username ?? ""
+            $("pass").value = saved2.password ?? ""
+          }
+        } catch {}
 
         // Pages is HTTPS, so a plain ws:// PTY socket is blocked as mixed content.
         const hints = []

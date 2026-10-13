@@ -18,6 +18,7 @@ let baseUrl = null
 let abort = null
 let socket = null
 let emitter = null
+let extraHeaders = {}
 
 /** Push an event to whatever host sink `subscribe` installed. */
 function emit(json) {
@@ -52,7 +53,7 @@ async function sendPrompt(sessionID, text) {
 
   const res = await fetch(`${baseUrl}/api/session/${encodeURIComponent(sessionID)}/prompt`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...extraHeaders },
     body: JSON.stringify({ prompt: { text } }),
   })
   const payload = await res.json().catch(() => null)
@@ -68,11 +69,12 @@ export const bridge = {
     abort?.abort()
     abort = new AbortController()
     baseUrl = options.baseUrl?.replace(/\/$/, "") ?? null
+    extraHeaders = options.headers ?? {}
     client = OpenCode.make({
       baseUrl: options.baseUrl,
       headers: options.headers,
     })
-    return { runtime: RUNTIME_VERSION, baseUrl }
+    return { runtime: RUNTIME_VERSION, baseUrl, auth: Boolean(extraHeaders.Authorization) }
   },
 
   close() {
@@ -80,6 +82,7 @@ export const bridge = {
     abort = null
     client = null
     baseUrl = null
+    extraHeaders = {}
     return true
   },
 
@@ -104,7 +107,7 @@ export const bridge = {
       const out = await require_().config.get()
       return out?.data ?? out
     } catch {
-      const res = await fetch(`${baseUrl}/config`)
+      const res = await fetch(`${baseUrl}/config`, { headers: { ...extraHeaders } })
       if (!res.ok) throw new Error(`config failed with ${res.status}`)
       return res.json()
     }
@@ -150,7 +153,7 @@ export const bridge = {
 
     const response = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...extraHeaders },
       body: JSON.stringify(body),
     })
     if (response.ok) return { ok: true, api: "v2", decision }
@@ -203,7 +206,7 @@ export const bridge = {
   async ptyCreate(input) {
     const response = await fetch(`${baseUrl}/api/pty`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...extraHeaders },
       body: JSON.stringify({
         command: input?.command,
         args: input?.args ?? [],
@@ -225,6 +228,12 @@ export const bridge = {
   ptyConnect(input) {
     const { ptyID } = input ?? {}
     if (!ptyID) throw new Error("ptyID is required")
+    // Browsers cannot attach headers to a WebSocket handshake, so a server that
+    // requires basic auth will reject the shell stream even when the API calls
+    // work. Say so instead of failing with a bare "socket closed".
+    if (extraHeaders.Authorization) {
+      throw new Error("AUTH_WS_UNSUPPORTED")
+    }
     socket?.close()
 
     const url = `${baseUrl.replace(/^http/, "ws")}/api/pty/${encodeURIComponent(ptyID)}/connect`
@@ -265,7 +274,10 @@ export const bridge = {
     socket?.close()
     socket = null
     if (ptyID) {
-      await fetch(`${baseUrl}/api/pty/${encodeURIComponent(ptyID)}`, { method: "DELETE" }).catch(() => null)
+      await fetch(`${baseUrl}/api/pty/${encodeURIComponent(ptyID)}`, {
+        method: "DELETE",
+        headers: { ...extraHeaders },
+      }).catch(() => null)
     }
     return { ok: true }
   },
