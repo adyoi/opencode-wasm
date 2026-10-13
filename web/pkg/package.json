@@ -1,0 +1,17 @@
+{
+  "name": "opencode-wasm",
+  "type": "module",
+  "description": "OpenCode agent runtime packaged as a single WebAssembly module",
+  "version": "0.1.0",
+  "license": "MIT",
+  "files": [
+    "opencode_wasm_bg.wasm",
+    "opencode_wasm.js",
+    "opencode_wasm.d.ts"
+  ],
+  "main": "opencode_wasm.js",
+  "types": "opencode_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

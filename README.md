@@ -67,9 +67,32 @@ Butuh `rustup target add wasm32-unknown-unknown` dan `wasm-pack`.
 
 ## Deploy ke GitHub Pages
 
-Ya, **bisa** — tapi ada satu batasan mixed content yang perlu dipahami.
+Situsnya terbit dari branch `main` (**Settings → Pages → Source: Deploy from a branch**, branch `main`, folder `/`).
 
-`.github/workflows/pages.yml` sudah disiapkan: build di CI (Node + Rust + wasm-pack), lalu deploy `web/` dan `opencode-standalone.html`. Set **Settings → Pages → Source: GitHub Actions**.
+```
+https://adyoi.github.io/opencode-wasm/          → redirect ke demo
+https://adyoi.github.io/opencode-wasm/web/      → demo (chat · shell · web)
+https://adyoi.github.io/opencode-wasm/dist/opencode-standalone.html  → satu file
+```
+
+Karena Pages menyajikan isi repo apa adanya, hasil build ikut di-commit:
+
+| Path | Ukuran | Isi |
+| --- | --- | --- |
+| `web/pkg/` | 127 KiB | `opencode_wasm_bg.wasm` + glue wasm-bindgen |
+| `web/vendor/` | 343 KiB | xterm.js untuk tab Shell |
+| `dist/` | 523 KiB | `opencode-standalone.html` |
+
+Setelah mengubah `js/entry.js`, `web/app.js`, atau `web/index.html`, jalankan `npm run build`
+lalu commit hasilnya. Workflow `Build & test` (.github/workflows/ci.yml) memverifikasi
+bahwa yang ter-commit sama dengan hasil build — kalau tidak sama, CI gagal.
+
+> **Trade-off:** mode branch menyimpan ±1 MB binary di riwayat git, dan workflow
+> `pages-build-deployment` milik GitHub tidak bisa di-*disable* (HTTP 422) sehingga ikut
+> menimpa deployment. Itu sebabnya ada `index.html` redirect di root: siapa pun yang
+> menang, pengunjung tetap sampai ke demo.
+> Kalau nanti mau Actions saja: `Settings → Pages → Source: GitHub Actions` — tapi
+> workflow-nya sudah tidak ada, jadi harus dibuat ulang lebih dulu.
 
 Yang bisa dari halaman HTTPS GitHub Pages:
 

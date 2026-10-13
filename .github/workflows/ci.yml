@@ -1,0 +1,54 @@
+name: Build & test
+
+# GitHub Pages publishes this repository from the main branch, so this workflow
+# only builds and verifies. The generated site lives in web/ and dist/ and is
+# committed (see .gitignore for why).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.15.0
+
+      - run: npm ci
+
+      - name: Build (runtime + terminal + wasm + standalone)
+        run: npm run build
+
+      - name: Rust tests
+        run: cargo test --manifest-path rust/Cargo.toml
+
+      - name: Verify the committed site matches a fresh build
+        run: |
+          rm -f web/pkg/.gitignore
+          for f in web/pkg/opencode_wasm_bg.wasm web/pkg/opencode_wasm.js \
+                   web/vendor/xterm.js web/vendor/xterm.css dist/opencode-standalone.html; do
+            git diff --quiet -- "$f" || { echo "::error::$f differs from the committed build"; exit 1; }
+          done
+          echo "site is in sync"
