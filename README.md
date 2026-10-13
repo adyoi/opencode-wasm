@@ -3,8 +3,8 @@
 Runtime agent [OpenCode](https://github.com/anomalyco/opencode) dipaketkan sebagai **satu file WebAssembly** dan dijalankan di browser — tanpa Node, tanpa Bun, tanpa bundler di sisi klien.
 
 ```
-opencode_wasm_bg.wasm   111 KiB   ← satu-satunya artefak yang perlu dikirim ke browser
-  └─ 36 KiB di dalamnya  runtime resmi opencode (@opencode/client) sebagai bytes
+opencode_wasm_bg.wasm   110.8 KiB   ← satu-satunya artefak yang perlu dikirim ke browser
+  └─ 36.0 KiB di dalamnya  runtime resmi opencode (@opencode/client) sebagai bytes
 ```
 
 Bisa dipakai lewat HTTP (GitHub Pages) **dan** sebagai satu file HTML yang dibuka langsung dari `file://`.

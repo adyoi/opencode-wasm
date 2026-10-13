@@ -71,7 +71,6 @@ export async function bootOpenCode({ wasm } = {}) {
     for (const request of drained.requests) dispatch(request)
     for (const reply of drained.replies) emit("reply", reply)
     for (const serverEvent of drained.events) emit("event", serverEvent)
-    emit("tick", drained)
     schedule(pump)
   }
 

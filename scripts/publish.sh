@@ -39,10 +39,14 @@ gh repo create "$USER_NAME/$REPO" \
   --push
 
 # Topics (max 20, lowercase, dashes only).
-gh repo edit "$USER_NAME/$REPO" --add-topic \
-  opencode webassembly wasm rust wasm-pack \
-  agent ai-coding-assistant pty xterm \
-  github-pages esbuild bun browser
+# `gh repo edit --add-topic` only accepts one value per call, so use the API.
+cat > /tmp/ocw-topics.json <<'JSON'
+{"names":["opencode","webassembly","wasm","rust","wasm-pack","agent",
+          "ai-coding-assistant","pty","xterm","github-pages","esbuild",
+          "bun","browser","single-file","demo"]}
+JSON
+gh api -X PUT "repos/$USER_NAME/$REPO/topics" --input /tmp/ocw-topics.json >/dev/null \
+  && echo "topics: ok"
 
 # Pages is served from the GitHub Actions workflow, not a branch.
 gh api -X POST "repos/$USER_NAME/$REPO/pages" \
