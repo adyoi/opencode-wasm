@@ -669,8 +669,11 @@
         return localStorage.getItem(SERVER_KEY) ?? "http://127.0.0.1:4096"
       }
 
-      function showConnectCard(note = "") {
-        const saved = defaultServerURL()
+      function showConnectCard(note = "", detectedURL = null) {
+        // A freshly detected address wins over the stored default: re-rendering
+        // the card must not throw away what the scan just found.
+        const saved = detectedURL ?? defaultServerURL()
+        if (detectedURL) localStorage.setItem(SERVER_KEY, detectedURL)
         thread.innerHTML = `
           <div class="card">
             <h2>Sambungkan ke server opencode</h2>
@@ -827,6 +830,7 @@
           if (!connected) setConnected(false, "butuh password", "")
           showConnectCard(
             `Server ditemukan di <code>${found.url}</code>, tapi ia memakai password. Isi kolom di bawah lalu tekan <b>Sambung</b>.`,
+            found.url,
           )
           return found.url
         }

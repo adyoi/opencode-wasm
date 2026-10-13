@@ -60,12 +60,35 @@ sendiri lalu menyambung otomatis:
 Cara kerjanya: halaman menembak `/global/health` ke beberapa kandidat sekaligus —
 `?server=` kalau ada, alamat yang dipakai terakhir, lalu `http://<hostname>:4096`
 (otomatis jadi `127.0.0.1` maupun IP LAN sesuai asal halaman), `127.0.0.1`, dan
-`localhost`. Yang menjawab duluan yang dipakai. Kalau tidak ketemu, kartu
-sambung tetap tampil dengan tombol **Cari lagi**.
+`localhost`. Yang menjawab duluan yang dipakai. Server yang balas **401** dianggap
+ditemukan juga — alamatnya diisi, lalu halaman meminta password. Kalau tidak ketemu,
+kartu sambung tetap tampil dengan tombol **Cari lagi**.
 
 Halaman **harus dibuka dari komputer yang sama** — `127.0.0.1` selalu menunjuk ke
 perangkat yang sedang dipakai. Cek cepat: buka `http://127.0.0.1:4096/global/health`;
 kalau muncul `{"healthy":true,...}` berarti sudah benar.
+
+#### Dari HP atau laptop lain (jaringan yang sama)
+
+`127.0.0.1` menunjuk ke perangkat masing-masing, jadi dari perangkat lain harus pakai
+IP LAN — dan **halamannya juga harus dibuka lewat `http://`, bukan dari Pages**:
+
+```powershell
+# 1. server mendengarkan untuk jaringan, dengan password
+.\tools\opencode-patched.exe serve --hostname 0.0.0.0 --port 4096 --cors http://10.1.0.112:5173
+
+# 2. demo juga mendengarkan untuk jaringan
+npm run serve:lan
+```
+
+Lalu dari perangkat lain buka **`http://10.1.0.112:5173/web/`**. Halaman menemukan
+IP LAN-nya sendiri, lalu meminta password karena server diproteksi.
+
+> Kenapa tidak lewat Pages saja? Browser memblokir `http://` ke alamat jaringan
+> pribadi dari halaman HTTPS (*mixed content*). `127.0.0.1` dikecualikan, `10.1.0.112`
+> tidak — diverifikasi: dari Pages, request ke `http://10.1.0.112:4096` diblokir
+> browser. Untuk perangkat lain tanpa `http://`, harus pakai HTTPS: Codespaces atau
+> tunnel.
 
 ### Metode 2 — server di GitHub Codespaces
 
