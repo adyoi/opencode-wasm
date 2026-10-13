@@ -21,19 +21,29 @@ async function listAddresses() {
 }
 
 // Minimal static server for the demo (correct MIME types for .wasm).
-// Usage: node scripts/serve.mjs [root] [port] [--host <address>]
+// Usage: node scripts/serve.mjs [root] [port] [--host <address>] [--all]
 //
 // Binding to 0.0.0.0 lets other devices on the network open the demo over
 // plain http, which is the only way they can reach a local opencode server:
 // a browser blocks http:// requests to a private address from an https page,
 // so Pages cannot serve as the entry point for a LAN address.
+//
+// On anything other than loopback only the published part of the site is served
+// - the root redirect, web/ and dist/. The repository root also holds
+// tools/opencode-patched.exe (176 MB) and .gitignore, and neither belongs on the
+// network. Pass --all to serve everything, as loopback mode does.
 const args = process.argv.slice(2)
 const hostIndex = args.indexOf("--host")
 const host = hostIndex === -1 ? "127.0.0.1" : (args[hostIndex + 1] ?? "0.0.0.0")
+const serveEverything = args.includes("--all") || host === "127.0.0.1" || host === "localhost"
 const positional = args.filter((a, i) => !a.startsWith("--") && i !== hostIndex + 1)
 
 const root = resolve(positional[0] ?? fileURLToPath(new URL("..", import.meta.url)))
 const port = Number(positional[1] ?? process.env.PORT ?? 5173)
+
+/** The only paths a visitor of the published site needs. */
+const PUBLIC_PREFIXES = ["/web/", "/dist/"]
+const PUBLIC_FILES = ["/index.html"]
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
