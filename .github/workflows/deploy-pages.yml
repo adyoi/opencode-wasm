@@ -1,0 +1,70 @@
+name: Deploy Pages (artifact)
+
+# Optional alternative to publishing the repository as-is:
+# switch Settings -> Pages -> Source to "GitHub Actions" after the first run.
+#
+# The artifact mirrors the repository layout (root redirect + web/ + dist/)
+# on purpose. GitHub also runs a managed workflow called
+# "pages-build-deployment" that cannot be disabled (HTTP 422) and publishes the
+# branch, so both deployments can race. With identical layouts the winner does
+# not matter and visitors always land on the demo.
+#
+# Triggered manually so it does not duplicate the Build & test workflow.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.15.0
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Compose the site (same shape as the repository)
+        run: |
+          rm -f web/pkg/.gitignore
+          mkdir -p _site
+          cp index.html _site/index.html
+          cp -r web _site/web
+          mkdir -p _site/dist
+          cp dist/opencode-standalone.html _site/dist/opencode-standalone.html
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
