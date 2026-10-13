@@ -98,6 +98,13 @@
       .status.on .dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent); }
       .status.err .dot { background: var(--err); box-shadow: 0 0 0 3px color-mix(in srgb, var(--err) 16%, transparent); }
 
+      /* While connected the pill doubles as the disconnect control. */
+      .status[role="button"] { cursor: pointer; border-radius: 8px; padding: 4px 8px; margin: 0 -8px; transition: background .15s ease, color .15s ease; }
+      .status[role="button"]:hover { background: var(--surface); color: var(--text); }
+      .status[role="button"]:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
+      .status.offline { cursor: default; }
+      .status.offline:hover { background: none; color: var(--muted); }
+
       /* ---------- conversation ---------- */
 
       main {
@@ -422,7 +429,7 @@
       <button id="autoAllow" class="toggle" aria-pressed="true" title="Jawab otomatis permintaan izin dari agent">
         <i class="led"></i>auto-allow
       </button>
-      <div class="status" id="status"><i class="dot"></i><span id="statusText">offline</span></div>
+      <div class="status offline" id="status" role="button" tabindex="-1" aria-disabled="true" title="Belum tersambung"><i class="dot"></i><span id="statusText">offline</span></div>
     </header>
 
     <div class="shellbar">
@@ -479,6 +486,6 @@
       </div>
     </footer>
 
-    <script type="module" src="./app.js?v=9213472f"></script>
+    <script type="module" src="./app.js?v=e7d56b15"></script>
   </body>
 </html>

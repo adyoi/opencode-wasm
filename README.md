@@ -38,32 +38,60 @@ Yang bisa dilakukan: **menaruh runtime resmi opencode di dalam binary wasm**. Ha
 
 ## Cara jalan
 
-```bash
-# 1. server opencode v2 (tidak ada rilis publik v2 → pakai snapshot dev)
-npm i opencode-ai@dev --no-save --prefix tools/opencode-dev
+Dua cara saja: server di komputer sendiri, atau server di GitHub Codespaces.
 
-# 2. perbaiki versi supaya free tier tidak menolak dengan HTTP 426
-node scripts/patch-version.mjs tools/opencode-patched.exe 1.19.0-dev-20261013
+### Metode 1 — server di localhost
 
-# 3. config: model gratis + izin otomatis
-node scripts/config-demo.mjs http://127.0.0.1:4096 <configPath>
+```powershell
+cd "C:\Users\RDP\Documents\Default Project"
 
-# 4. jalankan
-tools/opencode-patched.exe serve --port 4096 --cors http://127.0.0.1:5173
-npm run serve            # http://127.0.0.1:5173/web/index.html
+# server (CORS untuk halaman lokal, Pages, dan file://)
+.\tools\opencode-patched.exe serve --port 4096 --cors http://127.0.0.1:5173 --cors https://adyoi.github.io --cors null
 ```
 
-Buka halamannya, isi URL server, klik **Sambung**.
+Buka halamannya, isi `http://127.0.0.1:4096`, klik **Sambung**:
+
+| Halaman | Alamat |
+| --- | --- |
+| Demo lokal | `http://127.0.0.1:5173/web/index.html` (`npm run serve`) |
+| GitHub Pages | `https://adyoi.github.io/opencode-wasm/web/?server=http://127.0.0.1:4096` |
+
+Halaman **harus dibuka dari komputer yang sama** — `127.0.0.1` selalu menunjuk ke
+perangkat yang sedang dipakai. Cek cepat: buka `http://127.0.0.1:4096/global/health`;
+kalau muncul `{"healthy":true,...}` berarti sudah benar.
+
+### Metode 2 — server di GitHub Codespaces
+
+Untuk diakses dari perangkat mana pun. Tidak ada `127.0.0.1`, tidak ada mixed content.
+
+1. Codespaces → **New codespace** di repo ini. `postCreateCommand` memasang opencode,
+   patch versi, dan menulis config.
+2. Jalankan servernya:
+   ```bash
+   tools/opencode-dev/node_modules/opencode-ai/bin/opencode serve \
+     --hostname 0.0.0.0 --port 4096 --cors https://adyoi.github.io
+   ```
+3. Di panel **PORTS**, set port `4096` visibility → **Public**.
+4. Buka:
+   ```
+   https://adyoi.github.io/opencode-wasm/web/?server=https://<nama-codespace>-4096.app.github.dev
+   ```
 
 ### Build sendiri
 
 ```bash
 npm install
-npm run build     # runtime + xterm + wasm + standalone
+npm run build     # runtime + xterm + wasm + cache-stamp + standalone
 npm test          # unit test Rust
+npm run verify    # instantiate wasm hasil build, cek runtime tertanam
 ```
 
 Butuh `rustup target add wasm32-unknown-unknown` dan `wasm-pack`.
+
+> `npm run build` wajib dijalankan sebelum commit kalau kamu mengubah `js/entry.js`,
+> `web/app.js`, atau `web/index.html`: Pages menyajikan isi repo apa adanya, dan CI
+> akan gagal kalau hasil build tidak sinkron.
+
 
 ## Deploy ke GitHub Pages
 

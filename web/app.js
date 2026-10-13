@@ -383,6 +383,11 @@
           terminal.writeln(`\r\n\x1b[31mshell gagal.\x1b[0m ${message}`)
         }
 
+        if (!connected) {
+          fail("Belum terhubung ke server. Sambungkan dulu lewat tombol Sambung.")
+          return
+        }
+
         try {
           if (ptyID) await call("ptyClose", { ptyID }).catch(() => null)
 
@@ -413,7 +418,11 @@
         } catch (err) {
           const message = String(err?.message ?? err)
           if (/AUTH_WS_UNSUPPORTED/.test(message)) {
-            fail("Server memakai password. Browser tidak bisa mengirim header Authorization ke WebSocket, jadi shell tidak bisa — butuh server tanpa password, atau reverse proxy yang menyisipkan header.")
+            fail(
+              localStorage.getItem(CRED_KEY)
+                ? "Browser memakai kredensial yang tersimpan di halaman ini, dan WebSocket tidak bisa mengirim header Authorization. Kosongkan kolom pengguna/password di kartu Sambung lalu sambungkan lagi — shell bisa jalan kalau server-nya tanpa password."
+                : "Server memakai password. Browser tidak bisa mengirim header Authorization ke WebSocket, jadi shell tidak bisa — butuh server tanpa password, atau reverse proxy yang menyisipkan header.",
+            )
           } else {
             fail(explain(err))
           }
@@ -434,6 +443,11 @@
         status.className = `status ${kind ?? ""}`
         $("statusText").textContent = label
         $("model").disabled = !value
+        // The pill is the disconnect control, so it is only actionable online.
+        status.classList.toggle("offline", !value)
+        status.setAttribute("aria-disabled", String(!value))
+        status.tabIndex = value ? 0 : -1
+        status.title = value ? "Klik untuk memutus sambungan ke server" : "Belum tersambung"
         // The connect card is removed once connected, so the button may be gone.
         const button = $("connect")
         if (button) button.disabled = value
@@ -551,11 +565,59 @@
           await startSession(chosenModel())
           setConnected(true, "tersambung", "on")
           system(`terhubung ke ${url} · ${$("model").title}`)
-          if (document.body.classList.contains("shell")) await startShell()        } catch (err) {
+          if (document.body.classList.contains("shell")) await startShell()
+        } catch (err) {
           setConnected(false, "gagal", "err")
           console.error("[opencode-wasm] connect failed", err)
           add("error", explain(err))
         }
+      }
+
+      /**
+       * Ask first, then disconnect. The status pill is the only disconnect
+       * control, so a mis-click on it should not silently drop a live session.
+       */
+      function confirmDisconnect() {
+        if (!connected) return
+        const where = localStorage.getItem(SERVER_KEY) ?? "server ini"
+        const extra = ptyID ? "\n\nShell yang sedang berjalan ikut ditutup." : ""
+        if (!confirm(`Putuskan sambungan ke ${where}?${extra}\n\nServer tetap jalan; sambungkan lagi kapan saja.`)) return
+        disconnect()
+      }
+
+      /**
+       * Putuskan sambungan: tutup shell, hentikan stream event, buang antrean
+       * panggilan yang menggantung, lalu kembali ke kartu sambung.
+       */
+      async function disconnect() {
+        if (!connected) return
+        if (ptyID) {
+          const closing = ptyID
+          ptyID = null
+          // The close has to land before the bridge is torn down: oc.close()
+          // aborts in-flight fetches, so a fire-and-forget request would be
+          // cancelled on its way out and the shell would survive on the server.
+          const ticket = oc.call("ptyClose", { ptyID: closing })
+          await Promise.race([
+            new Promise((resolve, reject) => waiting.set(ticket, { resolve, reject })),
+            new Promise((resolve) => setTimeout(resolve, 2000)),
+          ]).catch(() => null)
+        }
+        try {
+          // aborts the in-flight fetches and the event stream in one go
+          oc.close()
+        } catch (err) {
+          console.warn("[opencode-wasm] close failed", err)
+        }
+        // these would otherwise hang forever, since their reply never arrives
+        for (const [, pending] of waiting) pending.reject(new Error("terputus"))
+        waiting.clear()
+        sessionID = null
+        $("sessionMeta").textContent = ""
+        $("shellStatus").className = "status"
+        $("shellStatusText").textContent = "belum jalan"
+        setConnected(false, "terputus", "")
+        showConnectCard("Sambungan diputus. Server masih jalan selama prosesnya tidak dihentikan.")
       }
 
       const SERVER_KEY = "opencode-server"
@@ -570,7 +632,7 @@
         return localStorage.getItem(SERVER_KEY) ?? "http://127.0.0.1:4096"
       }
 
-      function showConnectCard() {
+      function showConnectCard(note = "") {
         const saved = defaultServerURL()
         thread.innerHTML = `
           <div class="card">
@@ -599,6 +661,7 @@
 
         // Pages is HTTPS, so a plain ws:// PTY socket is blocked as mixed content.
         const hints = []
+        if (note) hints.push(note)
         const servedLocally = ["localhost", "127.0.0.1", ""].includes(location.hostname)
         if (!servedLocally && /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])/.test(saved)) {
           hints.push(
@@ -658,6 +721,14 @@
       })
 
       $("send").onclick = send
+      // The status pill is the disconnect control.
+      $("status").onclick = confirmDisconnect
+      $("status").onkeydown = (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          confirmDisconnect()
+        }
+      }
       $("prompt").onkeydown = (e) => {
         if (e.key === "Enter") send()
       }

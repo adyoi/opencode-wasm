@@ -87,6 +87,14 @@ export async function bootOpenCode({ wasm } = {}) {
     remember: (id) => client.remember(id),
     session: () => client.session(),
     stats: () => JSON.parse(client.stats()),
+    /**
+     * Drop the connection to the server: aborts the in-flight fetches and the
+     * event stream. The wasm module stays usable, so `open` can be called again.
+     */
+    close() {
+      const api = globalThis.__oc
+      return typeof api?.close === "function" ? api.close() : false
+    },
     on,
     stop() {
       pumping = false
