@@ -49,12 +49,19 @@ cd "C:\Users\RDP\Documents\Default Project"
 .\tools\opencode-patched.exe serve --port 4096 --cors http://127.0.0.1:5173 --cors https://adyoi.github.io --cors null
 ```
 
-Buka halamannya, isi `http://127.0.0.1:4096`, klik **Sambung**:
+Buka halamannya — **tidak perlu mengetik apa pun**, halaman akan mencari server
+sendiri lalu menyambung otomatis:
 
 | Halaman | Alamat |
 | --- | --- |
 | Demo lokal | `http://127.0.0.1:5173/web/index.html` (`npm run serve`) |
-| GitHub Pages | `https://adyoi.github.io/opencode-wasm/web/?server=http://127.0.0.1:4096` |
+| GitHub Pages | `https://adyoi.github.io/opencode-wasm/web/` |
+
+Cara kerjanya: halaman menembak `/global/health` ke beberapa kandidat sekaligus —
+`?server=` kalau ada, alamat yang dipakai terakhir, lalu `http://<hostname>:4096`
+(otomatis jadi `127.0.0.1` maupun IP LAN sesuai asal halaman), `127.0.0.1`, dan
+`localhost`. Yang menjawab duluan yang dipakai. Kalau tidak ketemu, kartu
+sambung tetap tampil dengan tombol **Cari lagi**.
 
 Halaman **harus dibuka dari komputer yang sama** — `127.0.0.1` selalu menunjuk ke
 perangkat yang sedang dipakai. Cek cepat: buka `http://127.0.0.1:4096/global/health`;
@@ -72,10 +79,12 @@ Untuk diakses dari perangkat mana pun. Tidak ada `127.0.0.1`, tidak ada mixed co
      --hostname 0.0.0.0 --port 4096 --cors https://adyoi.github.io
    ```
 3. Di panel **PORTS**, set port `4096` visibility → **Public**.
-4. Buka:
-   ```
-   https://adyoi.github.io/opencode-wasm/web/?server=https://<nama-codespace>-4096.app.github.dev
-   ```
+4. Salin address yang tampil di panel itu (format
+   `https://<nama-codespace>-4096.app.github.dev`) ke kolom URL di halaman demo.
+
+Untuk Codespaces, penargetan otomatis tidak berlaku — address-nya tidak bisa
+ditebak dari browser, jadi tempel manual. Kalau mau otomatis, simpan address-nya
+sekali di kolom URL:localStorage mengingatnya untuk kunjungan berikutnya.
 
 ### Build sendiri
 

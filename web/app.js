@@ -641,6 +641,7 @@
             <div class="row">
               <input id="url" value="${saved.replace(/"/g, "&quot;")}" spellcheck="false" />
               <button id="connect" class="primary">Sambung</button>
+              <button id="rescan" title="Cari server opencode di alamat yang biasa">Cari lagi</button>
             </div>
             <div class="row creds">
               <input id="user" placeholder="pengguna (default: opencode)" autocomplete="username" />
@@ -649,6 +650,7 @@
             <p class="hint" id="connectHint"></p>
           </div>`
         $("connect").onclick = connect
+        $("rescan").onclick = () => rescan()
         $("url").onkeydown = (e) => e.key === "Enter" && connect()
 
         try {
@@ -674,6 +676,101 @@
           )
         }
         if (hints.length) $("connectHint").innerHTML = hints.join("<br><br>")
+      }
+
+      /* ---------- menemukan server sendiri ---------- */
+
+      const PROBE_TIMEOUT = 1500
+      const PROBE_PORTS = [4096]
+
+      /** Does something answer `/global/health` at this address? */
+      async function probe(baseUrl) {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT)
+        try {
+          const res = await fetch(`${baseUrl.replace(/\/$/, "")}/global/health`, {
+            signal: controller.signal,
+          })
+          if (!res.ok) return false
+          const body = await res.json().catch(() => null)
+          return body?.healthy === true || body?.healthy === "true"
+        } catch {
+          return false
+        } finally {
+          clearTimeout(timer)
+        }
+      }
+
+      /**
+       * Addresses worth trying, best first: whatever the URL asked for, whatever
+       * worked last time, then this host on the usual opencode ports. Using the
+       * page's own hostname is what makes a LAN address work without typing it.
+       */
+      function candidateServers() {
+        const list = []
+        const query = new URLSearchParams(location.search).get("server")
+        const saved = localStorage.getItem(SERVER_KEY)
+        if (query) list.push(query)
+        if (saved) list.push(saved)
+
+        const hosts = []
+        if (location.hostname) hosts.push(location.hostname)
+        for (const host of ["127.0.0.1", "localhost"]) if (!hosts.includes(host)) hosts.push(host)
+        for (const host of hosts) {
+          // keep any port the URL already used, then the common ones
+          let port = ""
+          try {
+            port = query ? new URL(query).port : ""
+          } catch {
+            /* a malformed ?server= is not worth guessing from */
+          }
+          if (port && port !== "4096") list.push(`http://${host}:${port}`)
+          for (const p of PROBE_PORTS) list.push(`http://${host}:${p}`)
+        }
+        return [...new Set(list)]
+      }
+
+      /** Probe every candidate at once and return the first that answers. */
+      async function discover() {
+        const candidates = candidateServers()
+        const results = await Promise.all(candidates.map(async (url) => ({ url, ok: await probe(url) })))
+        return results.find((r) => r.ok)?.url ?? null
+      }
+
+      /**
+       * Fill the field with a server that is actually running, then connect
+       * without making the visitor look anything up.
+       */
+      async function rescan() {
+        const button = $("rescan")
+        if (button) {
+          button.disabled = true
+          button.textContent = "mencari…"
+        }
+        if (!connected) setConnected(false, "mencari server…", "")
+
+        const fromQuery = new URLSearchParams(location.search).get("server")
+        const found = await discover()
+        const field = $("url")
+        if (button) {
+          button.disabled = false
+          button.textContent = "Cari lagi"
+        }
+        if (!field) return null
+
+        if (!found) {
+          if (!connected) setConnected(false, "offline", "")
+          showConnectCard(
+            "Tidak menemukan server opencode di alamat yang biasa. Pastikan <code>opencode serve</code> jalan, lalu tekan <b>Sambung</b> atau <b>Cari lagi</b>.",
+          )
+          return null
+        }
+
+        field.value = found
+        if (connected) return found
+        await connect()
+        if (!fromQuery) system(`server ditemukan otomatis di ${found}`)
+        return found
       }
 
       async function send() {
@@ -764,3 +861,6 @@
         const ticket = oc.call("ptyClose", { ptyID })
         waiting.delete(ticket)
       })
+
+      // No lookup required: find a running server and connect on its own.
+      await rescan()
