@@ -480,11 +480,12 @@
         status.className = `status ${kind ?? ""}`
         $("statusText").textContent = label
         $("model").disabled = !value
-        // The pill is the disconnect control, so it is only actionable online.
+        // The pill is the disconnect control online and the rescan trigger
+        // offline, so it stays actionable in both states.
         status.classList.toggle("offline", !value)
-        status.setAttribute("aria-disabled", String(!value))
-        status.tabIndex = value ? 0 : -1
-        status.title = value ? "Klik untuk memutus sambungan ke server" : "Belum tersambung"
+        status.setAttribute("aria-disabled", "false")
+        status.tabIndex = 0
+        status.title = value ? "Klik untuk memutus sambungan ke server" : "Klik untuk mencari server lagi"
         // The connect card is removed once connected, so the button may be gone.
         const button = $("connect")
         if (button) button.disabled = value
@@ -574,12 +575,28 @@
       const basicHeader = (username, password) =>
         `Basic ${btoa(`${username || "opencode"}:${password}`)}`
 
-      async function connect() {
-        const url = $("url").value.trim() || "http://127.0.0.1:4096"
+      /** Credentials remembered from an earlier visit, used when no card is shown. */
+      function storedCredentials() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(CRED_KEY) ?? "null")
+          return { username: saved?.username ?? "", password: saved?.password ?? "" }
+        } catch {
+          return { username: "", password: "" }
+        }
+      }
+
+      /**
+       * `url` may be passed in by the auto-detect, so connecting does not depend
+       * on the connect card being on screen. Credentials come from the card when
+       * it is there, otherwise from what was remembered last time.
+       */
+      async function connect(urlOverride = null) {
+        const url = (urlOverride ?? $("url")?.value ?? "").trim() || "http://127.0.0.1:4096"
         localStorage.setItem(SERVER_KEY, url)
 
-        const username = $("user").value.trim()
-        const password = $("pass").value
+        const stored = storedCredentials()
+        const username = ($("user")?.value ?? "").trim() || stored.username
+        const password = $("pass")?.value ?? stored.password
         const headers = password ? { Authorization: basicHeader(username, password) } : {}
         if (password) localStorage.setItem(CRED_KEY, JSON.stringify({ username, password }))
         else localStorage.removeItem(CRED_KEY)
@@ -795,10 +812,11 @@
       }
 
       /**
-       * Fill the field with a server that is actually running, then connect
-       * without making the visitor look anything up.
+       * Look for a running server and connect to it. The connect card only
+       * appears when something needs the visitor to act: no server at all, or a
+       * server that wants a password.
        */
-      async function rescan() {
+      async function rescan({ quiet = false } = {}) {
         const button = $("rescan")
         if (button) {
           button.disabled = true
@@ -813,20 +831,25 @@
           button.disabled = false
           button.textContent = "Cari lagi"
         }
-        if (!field) return null
 
         if (!found) {
           if (!connected) setConnected(false, "offline", "")
-          showConnectCard(
-            "Tidak menemukan server opencode di alamat yang biasa. Pastikan <code>opencode serve</code> jalan, lalu tekan <b>Sambung</b> atau <b>Cari lagi</b>.",
-          )
+          if (!quiet) {
+            showConnectCard(
+              "Tidak menemukan server opencode di alamat yang biasa. Pastikan <code>opencode serve</code> jalan, lalu tekan <b>Sambung</b> atau <b>Cari lagi</b>.",
+            )
+          }
           return null
         }
 
-        field.value = found.url
+        if (field) field.value = found.url
         if (found.needsAuth) {
-          // A 401 is a server, just not an open one. Show the card and let the
-          // visitor supply the password instead of failing the connection.
+          // A 401 is a server, just not an open one. If this browser already
+          // remembers a password, try it before asking for one again.
+          if (storedCredentials().password) {
+            await connect(found.url)
+            if (connected) return found.url
+          }
           if (!connected) setConnected(false, "butuh password", "")
           showConnectCard(
             `Server ditemukan di <code>${found.url}</code>, tapi ia memakai password. Isi kolom di bawah lalu tekan <b>Sambung</b>.`,
@@ -836,7 +859,7 @@
         }
 
         if (connected) return found.url
-        await connect()
+        await connect(found.url)
         if (!fromQuery) system(`server ditemukan otomatis di ${found.url}`)
         return found.url
       }
@@ -871,7 +894,10 @@
 
       oc = await bootOpenCode()
       $("runtimeMeta").textContent = `runtime tertanam ${kb(oc.embeddedBytes)}`
-      showConnectCard()
+      // No connect card up front: the scan runs immediately and the card only
+      // appears if there is nothing to connect to, or a password is needed.
+      thread.innerHTML = `<div class="msg system"><div class="body">mencari server opencode…</div></div>`
+      setConnected(false, "mencari server…", "")
 
       oc.on("event", onEvent)
 
@@ -886,12 +912,13 @@
       })
 
       $("send").onclick = send
-      // The status pill is the disconnect control.
-      $("status").onclick = confirmDisconnect
+      // The status pill is the disconnect control when online, and the way to
+      // look for a server again when offline.
+      $("status").onclick = () => (connected ? confirmDisconnect() : rescan())
       $("status").onkeydown = (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault()
-          confirmDisconnect()
+          connected ? confirmDisconnect() : rescan()
         }
       }
       $("prompt").onkeydown = (e) => {
