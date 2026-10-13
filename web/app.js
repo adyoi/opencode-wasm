@@ -90,6 +90,22 @@
         return text.length > n ? `${text.slice(0, n)}…` : text
       }
 
+      const LOOPBACK = ["localhost", "127.0.0.1", "::1", "[::1]"]
+
+      /** The address the page is actually trying to reach. */
+      function currentServerURL() {
+        const field = document.getElementById("url")
+        return (field?.value ?? localStorage.getItem("opencode-server") ?? "").trim()
+      }
+
+      const hostOf = (url) => {
+        try {
+          return new URL(url).hostname
+        } catch {
+          return ""
+        }
+      }
+
       /** Turn transport/CORS noise into something a person can act on. */
       function explain(err) {
         const message = err?.message ?? String(err)
@@ -97,19 +113,40 @@
           return "Server minta autentikasi. Isi kolom password di kartu Sambung (user default: opencode)."
         }
         if (/Failed to fetch|Transport: Failed to fetch|NetworkError|Load failed/i.test(message)) {
-          const cors = location.protocol === "https:" && !location.host.includes("127.0.0.1")
+          const target = currentServerURL()
+          const host = hostOf(target)
+          const isLoopback = LOOPBACK.includes(host)
+          const httpsPage = location.protocol === "https:"
+          const cors = httpsPage && !LOOPBACK.includes(location.hostname)
             ? `opencode serve --port 4096 --cors ${location.origin}`
             : "opencode serve --port 4096"
-          const remote = location.hostname && !["localhost", "127.0.0.1", ""].includes(location.hostname)
-          return [
+
+          const notes = [
             "Tidak bisa menghubungi server.",
+            `Alamat yang dicoba: ${target || "(kosong)"}`,
             "Coba cek: (1) opencode serve masih jalan, (2) portnya benar, (3) origin halaman ini ada di --cors.",
             `contoh: ${cors}`,
-            "Kalau browser meminta izin jaringan lokal untuk situs ini, setujui dulu (ikon kunci di address bar).",
-            remote ? `Catatan: halaman dibuka dari ${location.hostname}, jadi 127.0.0.1 menunjuk ke perangkat ini. Dari perangkat lain, pakai IP LAN.` : "",
           ]
-            .filter(Boolean)
-            .join("\n")
+
+          if (isLoopback && !LOOPBACK.includes(location.hostname)) {
+            notes.push(
+              `Halaman ini dibuka dari ${location.hostname}, jadi ${host} menunjuk ke perangkat ini — bukan ke mesin tempat server berjalan. Dari perangkat lain, pakai IP LAN.`,
+            )
+          }
+          if (!isLoopback && host) {
+            notes.push(
+              `${host} hanya menjawab kalau servernya dijalankan dengan --hostname 0.0.0.0 (default 127.0.0.1 hanya untuk komputer ini). Cek juga firewall dan Wi-Fi yang memblokir perangkat antar-jaringan.`,
+            )
+          }
+          if (httpsPage && target.startsWith("http://")) {
+            notes.push(
+              isLoopback
+                ? "Halaman ini HTTPS dan server-nya http://. Chromium mengizinkan ini untuk localhost; browser lain bisa lebih ketat."
+                : "Halaman ini HTTPS dan servernya http:// di alamat jaringan pribadi — browser sering memblokirnya. Pakai https:// (Codespaces atau tunnel), atau buka halamannya lewat http://.",
+            )
+          }
+          notes.push("Kalau browser meminta izin jaringan lokal untuk situs ini, setujui dulu (ikon kunci di address bar).")
+          return notes.join("\n")
         }
         return message
       }
@@ -665,14 +702,23 @@
         const hints = []
         if (note) hints.push(note)
         const servedLocally = ["localhost", "127.0.0.1", ""].includes(location.hostname)
-        if (!servedLocally && /^(https?:\/\/)?(localhost|127\.0\.0\.1|\[::1\])/.test(saved)) {
+        const savedHost = hostOf(saved)
+        const savedIsLoopback = LOOPBACK.includes(savedHost)
+        if (!servedLocally && savedIsLoopback) {
           hints.push(
-            `Halaman ini dibuka dari <code>${location.hostname}</code>, jadi <code>127.0.0.1</code> menunjuk ke komputer ini — bukan ke mesin tempat server berjalan. Buka dari komputer yang sama, atau isi URL server yang bisa dijangkau (mis. <code>?server=http://192.168.1.10:4096</code>).`,
+            `Halaman ini dibuka dari <code>${location.hostname}</code>, jadi <code>${savedHost}</code> menunjuk ke komputer ini — bukan ke mesin tempat server berjalan. Buka dari komputer yang sama, atau isi URL server yang bisa dijangkau.`,
+          )
+        }
+        if (!servedLocally && !savedIsLoopback && savedHost) {
+          hints.push(
+            `<code>${savedHost}</code> hanya menjawab kalau servernya dijalankan dengan <code>--hostname 0.0.0.0</code>. Kalau tidak, pakai <code>127.0.0.1</code> dari komputer yang sama.`,
           )
         }
         if (location.protocol === "https:" && saved.startsWith("http://")) {
           hints.push(
-            "Halaman ini HTTPS dan server-nya <code>http://</code>. Chromium mengizinkan ini untuk <code>localhost</code>; browser lain bisa lebih ketat — siapkan <code>wss://</code> kalau shell tidak mau tersambung.",
+            savedIsLoopback
+              ? "Halaman ini HTTPS dan server-nya <code>http://</code>. Chromium mengizinkan ini untuk <code>localhost</code>; browser lain bisa lebih ketat — siapkan <code>wss://</code> kalau shell tidak mau tersambung."
+              : "Halaman ini HTTPS dan servernya <code>http://</code> di alamat jaringan pribadi — browser sering memblokirnya. Pakai <code>https://</code> (Codespaces atau tunnel), atau buka halamannya lewat <code>http://</code>.",
           )
         }
         if (hints.length) $("connectHint").innerHTML = hints.join("<br><br>")
