@@ -29,7 +29,7 @@
     "build:js": "node js/build.mjs",
     "build:terminal": "node js/build-terminal.mjs",
     "build:standalone": "node js/build-standalone.mjs",
-    "build:wasm": "wasm-pack build rust --target web --out-dir ..\\web\\pkg --out-name opencode_wasm --release",
+    "build:wasm": "wasm-pack build rust --target web --out-dir ../web/pkg --out-name opencode_wasm --release",
     "build": "npm run build:js && npm run build:terminal && npm run build:wasm && npm run build:standalone",
     "test": "cargo test --manifest-path rust/Cargo.toml",
     "serve": "node scripts/serve.mjs",

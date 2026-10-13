@@ -17,7 +17,6 @@ let client = null
 let baseUrl = null
 let abort = null
 let socket = null
-let socketID = null
 let emitter = null
 
 /** Push an event to whatever host sink `subscribe` installed. */
@@ -196,13 +195,6 @@ export const bridge = {
 
   /* ---------------- shell (PTY on the opencode server) ---------------- */
 
-  /** Shells the server knows about, if it exposes the list. */
-  async shells() {
-    const response = await fetch(`${baseUrl}/pty/shells`)
-    if (!response.ok) throw new Error(`shells failed with ${response.status}`)
-    return response.json()
-  },
-
   /**
    * Start a shell on the server. `input` is
    * `{ command, args, cwd, title, env }`; omitting `command` uses the server
@@ -234,7 +226,6 @@ export const bridge = {
     const { ptyID } = input ?? {}
     if (!ptyID) throw new Error("ptyID is required")
     socket?.close()
-    socketID = ptyID
 
     const url = `${baseUrl.replace(/^http/, "ws")}/api/pty/${encodeURIComponent(ptyID)}/connect`
     socket = new WebSocket(url)
@@ -273,15 +264,10 @@ export const bridge = {
     const { ptyID } = input ?? {}
     socket?.close()
     socket = null
-    socketID = null
     if (ptyID) {
       await fetch(`${baseUrl}/api/pty/${encodeURIComponent(ptyID)}`, { method: "DELETE" }).catch(() => null)
     }
     return { ok: true }
-  },
-
-  ptyList() {
-    return fetch(`${baseUrl}/api/pty`).then((r) => r.json())
   },
 }
 

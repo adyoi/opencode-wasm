@@ -264,9 +264,7 @@
           historyIndex = history.length - 1
         }
         $("webUrl").value = target
-        // Framing cannot be detected reliably across browsers, so the escape
-        // hatch is always offered instead of guessing.
-        $("webBlocked").classList.remove("show")
+        $("webEmpty").hidden = true
         $("webview").src = target
       }
 
@@ -610,14 +608,12 @@
       $("webFwd").onclick = () => step(1)
       $("webReload").onclick = () => openInPanel($("webUrl").value, { push: false })
       $("webExternal").onclick = () => window.open($("webUrl").value, "_blank", "noopener")
-      $("webBlockedOpen").onclick = () => window.open($("webUrl").value, "_blank", "noopener")
       $("webUrl").onkeydown = (e) => {
         if (e.key === "Enter") openInPanel($("webUrl").value)
       }
-      // Clicking an empty frame is the honest signal that embedding was refused.
-      $("webview").addEventListener("load", () => {
-        if ($("webview").src === "about:blank") $("webBlocked").classList.add("show")
-      })
+      for (const button of document.querySelectorAll("#webEmpty [data-url]")) {
+        button.onclick = () => openInPanel(button.dataset.url)
+      }
 
       // Best effort: detach the websocket when the page goes away.
       globalThis.addEventListener("pagehide", () => {

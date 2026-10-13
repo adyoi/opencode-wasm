@@ -251,10 +251,11 @@
       body.web #webframe { display: block; }
       #webframe iframe { width: 100%; height: 100%; border: none; background: #fff; }
 
+      /* empty state of the web panel, shown until a URL is opened */
       .blocked {
         position: absolute;
         inset: 0;
-        display: none;
+        display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
@@ -264,10 +265,13 @@
         background: var(--bg);
         color: var(--muted);
       }
-      .blocked.show { display: flex; }
-      .blocked strong { color: var(--text); font-weight: 600; font-size: 14px; }
-      .blocked code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--faint); word-break: break-all; }
-      .blocked .actions { display: flex; gap: 8px; margin-top: 6px; }
+      .blocked[hidden] { display: none; }
+      .blocked strong { color: var(--text); font-weight: 600; font-size: 15px; }
+      .blocked span { max-width: 46ch; font-size: 13.5px; }
+      .blocked code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--faint); }
+      .blocked .actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; justify-content: center; }
+      .blocked .hint { color: var(--faint); font-size: 12.5px; max-width: 52ch; margin: 4px 0 0; }
+      .blocked b { color: var(--muted); font-weight: 600; }
 
       .nav {
         display: flex;
@@ -293,7 +297,7 @@
       body.shell .shellbar { display: flex; }
       body.shell .composer, body.shell .sub { display: none; }
       body.shell main { padding: 12px 20px; }
-      .shellbar input, .shellbar select {
+      .shellbar input, .shellbar select, .webbar input {
         background: var(--bg);
         border: 1px solid var(--line);
         color: var(--text);
@@ -302,7 +306,7 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 12.5px;
       }
-      .shellbar .grow { flex: 1; min-width: 0; }
+      .shellbar .grow, .webbar input { flex: 1; min-width: 0; }
 
       #terminal {
         display: none;
@@ -446,12 +450,15 @@
       <div id="terminal"></div>
       <div id="webframe">
         <iframe id="webview" title="browser" referrerpolicy="no-referrer"></iframe>
-        <div class="blocked" id="webBlocked">
-          <strong>Frame kosong? Situs itu hampir certainly memblokir embedding.</strong>
-          <span>Banyak situs mengirim <code>X-Frame-Options</code> atau <code>frame-ancestors</code> supaya tidak bisa diputar di iframe.</span>
+        <div class="blocked" id="webEmpty">
+          <strong>Panel browser</strong>
+          <span>Masukkan URL di atas, atau tekan <b>buka</b> pada chip <code>webfetch</code>/<code>websearch</code> di tab Chat.</span>
           <div class="actions">
-            <button id="webBlockedOpen" class="primary">Buka di tab baru</button>
+            <button data-url="https://example.com">example.com</button>
+            <button data-url="https://news.ycombinator.com">news.ycombinator.com</button>
+            <button data-url="https://www.rust-lang.org">rust-lang.org</button>
           </div>
+          <p class="hint">Situs dengan <code>X-Frame-Options</code> atau <code>frame-ancestors</code> tidak bisa tampil di iframe — pakai <b>Tab baru</b>.</p>
         </div>
       </div>
     </main>
