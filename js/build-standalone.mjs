@@ -50,7 +50,7 @@ const bootstrap = `globalThis.__inlineStyles = true;\nglobalThis.__wasmBytes = U
 const inlineScript = [bootstrap, appCode].join("\n").replace(/<\/script>/gi, "<\\/script>")
 
 const replaced = html.replace(
-  /<script type="module" src="\.\/app\.js"><\/script>/,
+  /<script type="module" src="\.\/app\.js(?:\?v=[0-9a-f]+)?"><\/script>/,
   `<style>\n${xtermCss}\n    </style>\n    <script type="module">\n${inlineScript}\n    </script>`,
 )
 if (replaced === html) throw new Error("could not find the app script tag in web/index.html")
