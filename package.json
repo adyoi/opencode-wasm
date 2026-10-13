@@ -33,6 +33,7 @@
     "build:wasm": "wasm-pack build rust --target web --out-dir ../web/pkg --out-name opencode_wasm --release",
     "build": "npm run build:js && npm run build:terminal && npm run build:wasm && npm run build:stamp && npm run build:standalone",
     "test": "cargo test --manifest-path rust/Cargo.toml",
+    "verify": "node scripts/verify-build.mjs",
     "serve": "node scripts/serve.mjs",
     "smoke": "node scripts/smoke.mjs",
     "demo:config": "node scripts/config-demo.mjs",
