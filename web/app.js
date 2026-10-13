@@ -446,7 +446,7 @@
           for (const model of items) {
             const option = document.createElement("option")
             option.value = `${model.providerID}/${model.id}`
-            option.textContent = isFree(model) ? `${model.name} · free` : model.name
+            option.textContent = model.name
             group.appendChild(option)
           }
           picker.appendChild(group)
