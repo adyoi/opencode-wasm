@@ -97,14 +97,15 @@ npm run verify    # instantiate wasm hasil build, cek runtime tertanam
 
 Butuh `rustup target add wasm32-unknown-unknown` dan `wasm-pack`.
 
-> `npm run build` wajib dijalankan sebelum commit kalau kamu mengubah `js/entry.js`,
-> `web/app.js`, atau `web/index.html`: Pages menyajikan isi repo apa adanya, dan CI
-> akan gagal kalau hasil build tidak sinkron.
+> `npm run build` tidak wajib sebelum commit: publish ke Pages dibangun ulang di CI.
+> tetap jalankan kalau kamu memakai `npm run serve` lokal atau ingin berkas
+> satu-file di `dist/` ikut sesuai.
 
 
 ## Deploy ke GitHub Pages
 
-Situsnya terbit dari branch `main` (**Settings → Pages → Source: Deploy from a branch**, branch `main`, folder `/`).
+Situsnya terbit dari **GitHub Actions**, bukan dari isi branch
+(**Settings → Pages → Source: GitHub Actions**).
 
 ```
 https://adyoi.github.io/opencode-wasm/          → redirect ke demo
@@ -112,24 +113,32 @@ https://adyoi.github.io/opencode-wasm/web/      → demo (chat · shell · web)
 https://adyoi.github.io/opencode-wasm/dist/opencode-standalone.html  → satu file
 ```
 
-Karena Pages menyajikan isi repo apa adanya, hasil build ikut di-commit:
+Setiap push ke `main`, `.github/workflows/deploy-pages.yml` membangun ulang dari
+sumber, menjalankan test Rust + cek wasm, lalu menerbitkan hasilnya. Jadi yang
+tayang adalah hasil build CI — bukan file yang kebetulan ter-commit.
+
+Hasil build **tetap ikut di-commit** supaya bisa dipakai tanpa Actions:
 
 | Path | Ukuran | Isi |
 | --- | --- | --- |
 | `web/pkg/` | 127 KiB | `opencode_wasm_bg.wasm` + glue wasm-bindgen |
 | `web/vendor/` | 343 KiB | xterm.js untuk tab Shell |
-| `dist/` | 523 KiB | `opencode-standalone.html` |
+| `dist/` | 531 KiB | `opencode-standalone.html` |
 
-Setelah mengubah `js/entry.js`, `web/app.js`, atau `web/index.html`, jalankan `npm run build`
-lalu commit hasilnya. Workflow `Build & test` (.github/workflows/ci.yml) memverifikasi
-bahwa yang ter-commit sama dengan hasil build — kalau tidak sama, CI gagal.
+Setelah mengubah `js/entry.js`, `web/app.js`, atau `web/index.html`, jalankan
+`npm run build` lalu commit hasilnya — supaya `npm run serve` lokal dan berkas
+satu-file ikut sesuai. Publish ke Pages tidak bergantung pada ini.
 
-> **Trade-off:** mode branch menyimpan ±1 MB binary di riwayat git, dan workflow
-> `pages-build-deployment` milik GitHub tidak bisa di-*disable* (HTTP 422) sehingga ikut
-> menimpa deployment. Itu sebabnya ada `index.html` redirect di root: siapa pun yang
-> menang, pengunjung tetap sampai ke demo.
-> Kalau nanti mau Actions saja: `Settings → Pages → Source: GitHub Actions` — tapi
-> workflow-nya sudah tidak ada, jadi harus dibuat ulang lebih dulu.
+> Catatan jujur soal duplikasi: `Build & test` (ci.yml) dan `Deploy Pages` sama-sama
+> build di tiap push. `ci.yml` tinggal jadi gerbang tes; kalau ingin lebih irit,
+> hapus langkah build-nya dan biarkan `deploy-pages.yml` yang()), yang juga sudah
+> menjalankan test yang sama sebelum publish.
+
+> **Soal `pages-build-deployment`:** workflow bawaan GitHub itu tidak bisa di-*disable*
+> (HTTP 422). Saat Pages masih branch mode, dia ikut menimpa deployment — Itu sebabnya
+> ada `index.html` redirect di root: siapa pun yang menang, pengunjung tetap sampai ke
+> demo. Sekarang Pages sudah `GitHub Actions`, jadi `Deploy Pages` yang menerbitkan, dan
+> `index.html` redirect itu tetap dipertahankan sebagai pengaman.
 
 Yang bisa dari halaman HTTPS GitHub Pages:
 
