@@ -1098,7 +1098,11 @@
         if (location.hostname) hosts.push(location.hostname)
         for (const host of ["127.0.0.1", "localhost"]) if (!hosts.includes(host)) hosts.push(host)
         for (const host of hosts) {
-          if (port && port !== "4096") list.push(`http://${host}:${port}`)
+          // The borrowed port only means something for a host we know how to
+          // reach the server on. Applied to the page's own hostname it invented
+          // addresses like http://adyoi.github.io:4097, which nothing listens on
+          // and which the browser rejects as mixed content on an HTTPS page.
+          if (port && port !== "4096" && LOOPBACK.includes(host)) list.push(`http://${host}:${port}`)
           for (const p of PROBE_PORTS) list.push(`http://${host}:${p}`)
         }
         return [...new Set(list)]
