@@ -1095,7 +1095,11 @@
         }
 
         const hosts = []
-        if (location.hostname) hosts.push(location.hostname)
+        // The page's own hostname is only worth probing when the page itself is
+        // plain http. Over HTTPS every request to it is mixed content and gets
+        // blocked before it leaves, which on GitHub Pages means a guaranteed
+        // miss plus a console warning on every load.
+        if (location.hostname && location.protocol !== "https:") hosts.push(location.hostname)
         for (const host of ["127.0.0.1", "localhost"]) if (!hosts.includes(host)) hosts.push(host)
         for (const host of hosts) {
           // The borrowed port only means something for a host we know how to
