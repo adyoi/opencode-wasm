@@ -4,6 +4,7 @@ export const memory: WebAssembly.Memory;
 export const __wbg_opencode_free: (a: number, b: number) => void;
 export const event: (a: number, b: number) => void;
 export const opencode_boot: (a: number) => number;
+export const opencode_hasWork: (a: number) => number;
 export const opencode_new: () => number;
 export const opencode_pump: (a: number) => [number, number];
 export const opencode_queue: (a: number, b: number, c: number, d: number, e: number) => number;

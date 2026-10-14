@@ -7,11 +7,19 @@ const baseUrl = process.argv[2] ?? "http://127.0.0.1:4096"
 const text = process.argv[3] ?? "say hi in three words"
 const waiting = new Map()
 const counts = new Map()
+const CALL_TIMEOUT = 20_000
 
 const wasm = await readFile(fileURLToPath(new URL("../web/pkg/opencode_wasm_bg.wasm", import.meta.url)))
 const oc = await bootOpenCode({ wasm })
 const call = (method, payload = null) =>
-  new Promise((resolve, reject) => waiting.set(oc.call(method, payload), { resolve, reject }))
+  new Promise((resolve, reject) => {
+    const ticket = oc.call(method, payload)
+    waiting.set(ticket, { resolve, reject })
+    setTimeout(() => {
+      if (!waiting.delete(ticket)) return
+      reject(new Error(`${method} timed out after ${CALL_TIMEOUT}ms`))
+    }, CALL_TIMEOUT)
+  })
 
 oc.on("reply", ({ ticket, ok, data, error }) => {
   const p = waiting.get(ticket)
@@ -28,10 +36,16 @@ oc.on("event", (evt) => {
   }
 })
 
-await call("open", { baseUrl })
-const session = await call("createSession", {})
-await call("subscribe", {})
-await call("prompt", { sessionID: session.id, text })
+try {
+  await call("open", { baseUrl })
+  const session = await call("createSession", {})
+  await call("subscribe", {})
+  await call("prompt", { sessionID: session.id, text })
+} catch (err) {
+  console.error(`stopped: ${err.message}`)
+  oc.stop()
+  process.exit(1)
+}
 await new Promise((r) => setTimeout(r, 45_000))
 
 console.log("\n--- counts ---")

@@ -16,10 +16,26 @@ export class OpenCode {
     }
     /**
      * Mark the embedded JS runtime as evaluated; clears all pending state.
+     *
+     * The remembered session id is dropped too: `boot()` is what re-attaches a
+     * fresh wasm instance to the page, so a session left over from the previous
+     * one would be reported by `pump()` and `session()`.
      * @returns {boolean}
      */
     boot() {
         const ret = wasm.opencode_boot(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * True when a request is queued or a reply/event is waiting to be drained.
+     *
+     * The host polls this on every animation frame, so the idle case must stay
+     * cheap: it lets `pump()` skip a JSON serialise/parse round trip that would
+     * otherwise happen 60 times a second while nothing is going on.
+     * @returns {boolean}
+     */
+    hasWork() {
+        const ret = wasm.opencode_hasWork(this.__wbg_ptr);
         return ret !== 0;
     }
     constructor() {

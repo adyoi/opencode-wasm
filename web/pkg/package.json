@@ -4,6 +4,10 @@
   "description": "OpenCode agent runtime packaged as a single WebAssembly module",
   "version": "0.1.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adyoi/opencode-wasm"
+  },
   "files": [
     "opencode_wasm_bg.wasm",
     "opencode_wasm.js",

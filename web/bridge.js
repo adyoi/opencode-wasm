@@ -11,7 +11,7 @@ const listeners = new Map()
 function on(kind, fn) {
   if (!listeners.has(kind)) listeners.set(kind, new Set())
   listeners.get(kind).add(fn)
-  return () => listeners.get(kind).delete(fn)
+  return () => listeners.get(kind)?.delete(fn)
 }
 
 function emit(kind, value) {
@@ -22,10 +22,22 @@ function emit(kind, value) {
 
 // requestAnimationFrame is throttled (or paused) in hidden tabs and missing in
 // Node, so fall back to a timer whenever the page is not actively painting.
+//
+// The guard keeps exactly one chain alive. Both the loop itself and the
+// visibilitychange listener call schedule(), and without it every tab switch
+// would leave one more rAF chain running forever — each one pumping the wasm
+// module and JSON-parsing its output on every frame.
+let scheduled = false
 const schedule = (cb) => {
+  if (scheduled) return
+  scheduled = true
+  const run = () => {
+    scheduled = false
+    cb()
+  }
   const visible = typeof document === "undefined" || document.visibilityState === "visible"
-  if (visible && globalThis.requestAnimationFrame) globalThis.requestAnimationFrame(cb)
-  else setTimeout(cb, 16)
+  if (visible && globalThis.requestAnimationFrame) globalThis.requestAnimationFrame(run)
+  else setTimeout(run, 16)
 }
 
 export async function bootOpenCode({ wasm } = {}) {
@@ -67,10 +79,15 @@ export async function bootOpenCode({ wasm } = {}) {
 
   function pump() {
     if (!pumping) return
-    const drained = JSON.parse(client.pump())
-    for (const request of drained.requests) dispatch(request)
-    for (const reply of drained.replies) emit("reply", reply)
-    for (const serverEvent of drained.events) emit("event", serverEvent)
+    // An idle frame is by far the common case. hasWork() is a cheap in-wasm
+    // check, and skipping it avoids serialising an empty drain to JSON and
+    // parsing it back on every single animation frame.
+    if (client.hasWork()) {
+      const drained = JSON.parse(client.pump())
+      for (const request of drained.requests) dispatch(request)
+      for (const reply of drained.replies) emit("reply", reply)
+      for (const serverEvent of drained.events) emit("event", serverEvent)
+    }
     schedule(pump)
   }
 

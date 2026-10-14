@@ -16,17 +16,20 @@ if [ ! -d .git ]; then
   git init -q -b main
 fi
 
-# Prebuilt wasm and bundled deps are ignored on purpose: CI rebuilds them.
-cat > .gitignore <<'EOF'
+# web/pkg, web/vendor and dist are intentionally COMMITTED — GitHub Pages
+# publishes this repository, and .gitignore says so. An earlier version of this
+# script rewrote .gitignore with a list that ignored all three, which silently
+# dropped the published site from the very commit it was deploying from.
+# Leave an existing .gitignore alone; only seed it for a brand-new repository.
+if [ ! -f .gitignore ]; then
+  cat > .gitignore <<'EOF'
 node_modules/
 rust/target/
 tools/
 js/dist/
-web/pkg/
-web/vendor/
-dist/
 *.log
 EOF
+fi
 
 git add -A
 git commit -q -m "opencode-wasm: OpenCode runtime as a single wasm module" || true

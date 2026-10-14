@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "OpenCode agent runtime packaged as a single WebAssembly module"
 license = "MIT"
+repository = "https://github.com/adyoi/opencode-wasm"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

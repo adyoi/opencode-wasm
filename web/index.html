@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
     <title>opencode · wasm</title>
     <style>
       :root {
@@ -63,6 +64,24 @@
       .mark span { color: var(--faint); font-size: 12.5px; }
 
       .spacer { flex: 1; }
+
+      /* Agent, model and variant: three separate settings, so three controls. */
+      .pickers {
+        max-width: 720px;
+        margin: 8px auto 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .picker-agent { flex: 0 1 auto; min-width: 0; }
+      .picker-model { flex: 1 1 0; min-width: 0; }
+      .picker-variant { flex: 0 1 auto; max-width: 170px; }
+      .picker-variant[hidden] { display: none; }
+      @media (max-width: 720px) {
+        .pickers { font-size: 12px; }
+        .picker-variant { max-width: 110px; }
+      }
 
       select {
         appearance: none;
@@ -248,7 +267,7 @@
         background: var(--surface);
       }
       body.web .webbar { display: flex; }
-      body.web .composer, body.web .sub { display: none; }
+      body.web .composer, body.web .sub, body.web .pickers { display: none; }
       body.web main { padding: 0; }
       body.web #thread, body.web #terminal { display: none; }
 
@@ -287,6 +306,26 @@
         border-radius: 10px;
       }
       .nav button { border: none; background: none; padding: 5px 9px; font-size: 13px; line-height: 1; }
+      /* One height for every control in the bar. The buttons used the generic
+         button padding and came out taller than the field beside them: 40px vs
+         28px for Go, 23px for the arrows. */
+      .webbar input, .webbar button { height: 30px; }
+      /* Matching type metrics, and the label centred on its own line. The
+         generic 21.6px line-height overflowed the 30px box and pushed the text
+         4px below centre. */
+      .webbar input,
+      .webbar button {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12.5px;
+        line-height: 1;
+        padding: 6px 10px;
+      }
+      .webbar button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 6px 12px;
+      }
       .webbar input { flex: 1; min-width: 0; }
 
       /* ---------- shell ---------- */
@@ -300,7 +339,7 @@
         background: var(--surface);
       }
       body.shell .shellbar { display: flex; }
-      body.shell .composer, body.shell .sub { display: none; }
+      body.shell .composer, body.shell .sub, body.shell .pickers { display: none; }
       body.shell main { padding: 12px 20px; }
       .shellbar input, .shellbar select, .webbar input {
         background: var(--bg);
@@ -417,13 +456,12 @@
   <body>
     <header>
       <div class="mark"><b>opencode</b><span>· wasm</span></div>
-      <div class="tabs" role="tablist">
-        <button id="tabChat" role="tab" aria-selected="true">Chat</button>
-        <button id="tabShell" role="tab" aria-selected="false">Shell</button>
-        <button id="tabWeb" role="tab" aria-selected="false">Web</button>
+      <div class="tabs" role="tablist" aria-label="Panel">
+        <button id="tabChat" role="tab" aria-selected="true" aria-controls="main">Chat</button>
+        <button id="tabShell" role="tab" aria-selected="false" aria-controls="main" tabindex="-1">Shell</button>
+        <button id="tabWeb" role="tab" aria-selected="false" aria-controls="main" tabindex="-1">Web</button>
       </div>
       <div class="spacer"></div>
-      <select id="model" disabled title="Model"></select>
       <button id="autoAllow" class="toggle" aria-pressed="true" title="Jawab otomatis permintaan izin dari agent">
         <i class="led"></i>auto-allow
       </button>
@@ -451,10 +489,10 @@
         <button id="webReload" title="muat ulang">⟳</button>
       </div>
       <input id="webUrl" placeholder="https://…" spellcheck="false" />
-      <button id="webExternal">Tab baru</button>
+      <button id="webGo" class="primary">Go</button>
     </div>
 
-    <main id="main">
+    <main id="main" role="tabpanel" aria-label="Panel demo">
       <div class="thread" id="thread"></div>
       <div id="terminal"></div>
       <div id="webframe">
@@ -467,7 +505,7 @@
             <button data-url="https://news.ycombinator.com">news.ycombinator.com</button>
             <button data-url="https://www.rust-lang.org">rust-lang.org</button>
           </div>
-          <p class="hint">Situs dengan <code>X-Frame-Options</code> atau <code>frame-ancestors</code> tidak bisa tampil di iframe — pakai <b>Tab baru</b>.</p>
+          <p class="hint">Situs dengan <code>X-Frame-Options</code> atau <code>frame-ancestors</code> menolak dimuat di iframe, jadi panelnya akan kosong.</p>
         </div>
       </div>
     </main>
@@ -477,13 +515,19 @@
         <input id="prompt" type="text" placeholder="Tanya opencode…" autocomplete="off" disabled />
         <button id="send" class="primary" disabled>Kirim</button>
       </div>
+      <div class="pickers">
+        <select id="agent" class="picker-agent" disabled title="Agent"></select>
+        <select id="model" class="picker-model" disabled title="Model untuk sesi ini"></select>
+        <select id="variant" class="picker-variant" disabled title="Varian model" hidden></select>
+      </div>
       <div class="sub">
         <span id="runtimeMeta">runtime —</span>
         <span id="counterMeta">queued 0 · replies 0 · events 0</span>
+        <span id="lastEvent"></span>
         <span class="grow" id="sessionMeta"></span>
       </div>
     </footer>
 
-    <script type="module" src="./app.js?v=ba3bbf38"></script>
+    <script type="module" src="./app.js?v=50346f25"></script>
   </body>
 </html>

@@ -18,14 +18,25 @@ if (!target) {
   process.exit(1)
 }
 
-const health = await (await fetch(`${baseUrl}/global/health`)).json().catch(() => ({}))
+/** Fetch JSON, or fall back. A dead server used to crash this with an
+ * unhandled rejection before it could print the hint below. */
+async function getJSON(url) {
+  const res = await fetch(url).catch(() => null)
+  if (!res?.ok) return {}
+  return res.json().catch(() => ({}))
+}
+
+const health = await getJSON(`${baseUrl}/global/health`)
 const [major, minor] = String(health.version ?? "0.0.0")
   .split(".")
   .map((part) => Number.parseInt(part, 10) || 0)
 const freeTierBlocked = major < 1 || (major === 1 && minor < 18)
+if (health.version === undefined) {
+  console.warn(`no version reported by ${baseUrl}/global/health — assuming the free tier is blocked`)
+}
 
-const { data: models } = await (await fetch(`${baseUrl}/api/model`)).json()
-const free = models.filter((m) => (m.cost ?? []).every((c) => !c.input && !c.output))
+const { data: models } = await getJSON(`${baseUrl}/api/model`)
+const free = (models ?? []).filter((m) => (m.cost ?? []).every((c) => !c.input && !c.output && !c.cache?.read))
 if (free.length === 0) {
   console.error("no free models reported by the server")
   process.exit(1)

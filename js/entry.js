@@ -11,12 +11,16 @@
 
 import { OpenCode } from "@opencode/client"
 
-const RUNTIME_VERSION = "2.0.28"
+// Injected by js/build.mjs from the installed @opencode/client package.json, so
+// the version reported to the host cannot drift away from the client that is
+// actually embedded. The fallback only matters when this file is loaded raw.
+const RUNTIME_VERSION = typeof __RUNTIME_VERSION__ === "string" ? __RUNTIME_VERSION__ : "0.0.0"
 
 let client = null
 let baseUrl = null
 let abort = null
 let socket = null
+let socketPtyID = null
 let emitter = null
 let extraHeaders = {}
 
@@ -28,6 +32,24 @@ function emit(json) {
 function require_() {
   if (!client) throw new Error("opencode client is not open, call __oc.open() first")
   return client
+}
+
+/** The normalised base URL. Every direct fetch builds its URL from this. */
+function requireBaseUrl() {
+  if (!baseUrl) throw new Error("opencode client has no baseUrl, call __oc.open(url) first")
+  return baseUrl
+}
+
+/**
+ * Drop the current PTY socket without telling anyone. Used before reconnecting:
+ * the previous socket's close handler is a no-op once it is no longer the
+ * current one, so a stale shell can never report itself as the closed one.
+ */
+function detachSocket() {
+  const previous = socket
+  socket = null
+  socketPtyID = null
+  previous?.close()
 }
 
 /**
@@ -51,7 +73,7 @@ async function sendPrompt(sessionID, text) {
     }
   }
 
-  const res = await fetch(`${baseUrl}/api/session/${encodeURIComponent(sessionID)}/prompt`, {
+  const res = await fetch(`${requireBaseUrl()}/api/session/${encodeURIComponent(sessionID)}/prompt`, {
     method: "POST",
     headers: { "content-type": "application/json", ...extraHeaders },
     body: JSON.stringify({ prompt: { text } }),
@@ -68,11 +90,13 @@ export const bridge = {
   open(options) {
     abort?.abort()
     abort = new AbortController()
-    baseUrl = options.baseUrl?.replace(/\/$/, "") ?? null
+    // Normalise once and hand the same value to the generated client: a
+    // trailing slash would otherwise produce `//api/...` in every route.
+    baseUrl = options.baseUrl?.trim().replace(/\/+$/, "") || null
     extraHeaders = options.headers ?? {}
     client = OpenCode.make({
-      baseUrl: options.baseUrl,
-      headers: options.headers,
+      baseUrl,
+      headers: extraHeaders,
     })
     return { runtime: RUNTIME_VERSION, baseUrl, auth: Boolean(extraHeaders.Authorization) }
   },
@@ -80,6 +104,7 @@ export const bridge = {
   close() {
     abort?.abort()
     abort = null
+    detachSocket()
     client = null
     baseUrl = null
     extraHeaders = {}
@@ -107,10 +132,21 @@ export const bridge = {
       const out = await require_().config.get()
       return out?.data ?? out
     } catch {
-      const res = await fetch(`${baseUrl}/config`, { headers: { ...extraHeaders } })
+      const res = await fetch(`${requireBaseUrl()}/config`, { headers: { ...extraHeaders } })
       if (!res.ok) throw new Error(`config failed with ${res.status}`)
       return res.json()
     }
+  },
+
+  /**
+   * Effective provider config: the only place model `variants` are declared.
+   * `/api/model` returns an empty array for them on every model.
+   */
+  async configProviders() {
+    const res = await fetch(`${requireBaseUrl()}/config/providers`, { headers: { ...extraHeaders } })
+    if (!res.ok) throw new Error(`config/providers failed with ${res.status}`)
+    const payload = await res.json().catch(() => null)
+    return payload?.data ?? payload
   },
 
   /** Create a session. `input` is a SessionCreateInput object. */
@@ -139,6 +175,25 @@ export const bridge = {
   },
 
   /**
+   * Switch the agent of an existing session — build, plan, general, explore.
+   * The generated client has no method for this route, and the API takes a bare
+   * `{ agent }` body, so it goes out as a direct fetch.
+   */
+  async setAgent(input) {
+    const response = await fetch(
+      `${requireBaseUrl()}/api/session/${encodeURIComponent(input.sessionID)}/agent`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", ...extraHeaders },
+        body: JSON.stringify({ agent: input.agent }),
+      },
+    )
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) throw new Error(payload?.message ?? `agent switch failed with ${response.status}`)
+    return { agent: input.agent, ...(payload?.data ?? {}) }
+  },
+
+  /**
    * Answer a permission request raised by the agent.
    * `decision` is "once" | "always" | "reject" — "always" persists the grant.
    *
@@ -149,7 +204,7 @@ export const bridge = {
   async replyPermission(input) {
     const decision = input.decision ?? "once"
     const body = input.message ? { reply: decision, message: input.message } : { reply: decision }
-    const url = `${baseUrl}/api/session/${encodeURIComponent(input.sessionID)}/permission/${encodeURIComponent(input.requestID)}/reply`
+    const url = `${requireBaseUrl()}/api/session/${encodeURIComponent(input.sessionID)}/permission/${encodeURIComponent(input.requestID)}/reply`
 
     const response = await fetch(url, {
       method: "POST",
@@ -204,7 +259,7 @@ export const bridge = {
    * default shell.
    */
   async ptyCreate(input) {
-    const response = await fetch(`${baseUrl}/api/pty`, {
+    const response = await fetch(`${requireBaseUrl()}/api/pty`, {
       method: "POST",
       headers: { "content-type": "application/json", ...extraHeaders },
       body: JSON.stringify({
@@ -234,13 +289,15 @@ export const bridge = {
     if (extraHeaders.Authorization) {
       throw new Error("AUTH_WS_UNSUPPORTED")
     }
-    socket?.close()
+    detachSocket()
 
-    const url = `${baseUrl.replace(/^http/, "ws")}/api/pty/${encodeURIComponent(ptyID)}/connect`
-    socket = new WebSocket(url)
-    socket.binaryType = "arraybuffer"
+    const url = `${requireBaseUrl().replace(/^http/, "ws")}/api/pty/${encodeURIComponent(ptyID)}/connect`
+    const ws = new WebSocket(url)
+    ws.binaryType = "arraybuffer"
+    socket = ws
+    socketPtyID = ptyID
 
-    socket.addEventListener("message", async (event) => {
+    ws.addEventListener("message", async (event) => {
       const chunk =
         typeof event.data === "string"
           ? event.data
@@ -252,29 +309,44 @@ export const bridge = {
       emit(JSON.stringify({ type: "pty.output", data: { ptyID, chunk: control ? chunk.slice(1) : chunk, control } }))
     })
 
-    socket.addEventListener("close", () => emit(JSON.stringify({ type: "pty.closed", data: { ptyID } })))
-    socket.addEventListener("error", () => emit(JSON.stringify({ type: "pty.closed", data: { ptyID, error: "socket error" } })))
+    // `error` is always followed by `close`, so the flag keeps the host from
+    // seeing two `pty.closed` events for one socket.
+    let closed = false
+    const finish = (error) => {
+      if (closed) return
+      closed = true
+      if (socket === ws) {
+        socket = null
+        socketPtyID = null
+      }
+      emit(JSON.stringify({ type: "pty.closed", data: error ? { ptyID, error } : { ptyID } }))
+    }
+    ws.addEventListener("close", () => finish())
+    ws.addEventListener("error", () => finish("socket error"))
 
     return new Promise((resolve) => {
-      socket.addEventListener("open", () => resolve({ ok: true, ptyID }), { once: true })
-      socket.addEventListener("error", () => resolve({ ok: false, ptyID }), { once: true })
+      ws.addEventListener("open", () => resolve({ ok: true, ptyID }), { once: true })
+      ws.addEventListener("error", () => resolve({ ok: false, ptyID }), { once: true })
     })
   },
 
   /** Send keystrokes to the attached PTY. */
   ptyInput(input) {
+    const data = input?.data ?? ""
+    // Keystrokes only make sense for the shell that is actually attached; a late
+    // event from the previous one would otherwise be typed into the new shell.
     if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error("pty socket is not open")
-    socket.send(input?.data ?? "")
-    return { ok: true, bytes: (input?.data ?? "").length }
+    if (input?.ptyID && input.ptyID !== socketPtyID) return { ok: false, reason: "stale pty", bytes: 0 }
+    socket.send(data)
+    return { ok: true, bytes: data.length }
   },
 
   /** Detach from the websocket and delete the PTY on the server. */
   async ptyClose(input) {
     const { ptyID } = input ?? {}
-    socket?.close()
-    socket = null
+    detachSocket()
     if (ptyID) {
-      await fetch(`${baseUrl}/api/pty/${encodeURIComponent(ptyID)}`, {
+      await fetch(`${requireBaseUrl()}/api/pty/${encodeURIComponent(ptyID)}`, {
         method: "DELETE",
         headers: { ...extraHeaders },
       }).catch(() => null)

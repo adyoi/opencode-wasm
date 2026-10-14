@@ -1,7 +1,12 @@
 // Confirm the PTY round trip: create a shell, type a command, read the output.
-const base = process.argv[2] ?? "http://127.0.0.1:4096"
+// Usage: node scripts/probe-pty.mjs [baseUrl]
+const base = (process.argv[2] ?? "http://127.0.0.1:4096").replace(/\/+$/, "")
+// Derive the websocket URL from the server that was actually probed. It used to
+// be hardcoded to ws://127.0.0.1:4096, so any other baseUrl — including an
+// https:// one, which needs wss:// — silently attached to the wrong place.
+const wsUrl = base.replace(/^http/, "ws")
 
-const created = await (await fetch(`${base}/api/pty`, {
+const createdResponse = await fetch(`${base}/api/pty`, {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
@@ -10,11 +15,20 @@ const created = await (await fetch(`${base}/api/pty`, {
     cwd: process.cwd(),
     title: "probe",
   }),
-})).json()
+})
+if (!createdResponse.ok) {
+  console.error(`pty create failed: ${createdResponse.status} ${createdResponse.statusText}`)
+  process.exit(1)
+}
+const created = await createdResponse.json()
 const ptyID = created?.data?.id
 console.log("pty ->", ptyID, created?.data?.status)
+if (!ptyID) {
+  console.error("server returned no pty id")
+  process.exit(1)
+}
 
-const ws = new WebSocket(`ws://127.0.0.1:4096/api/pty/${ptyID}/connect`)
+const ws = new WebSocket(`${wsUrl}/api/pty/${ptyID}/connect`)
 ws.binaryType = "arraybuffer"
 let output = ""
 let sent = false
@@ -39,9 +53,12 @@ setTimeout(async () => {
   const plain = output.replace(/\u001b\[[0-9;?]*[a-zA-Z]/g, "").replace(/\u001b\][^\u0007]*\u0007/g, "")
   console.log("--- stripped output ---")
   console.log(plain.slice(-600))
-  console.log("--- round trip:", plain.includes("hello-from-wasm") ? "OK" : "MISSING")
+  const roundTrip = plain.includes("hello-from-wasm")
+  console.log("--- round trip:", roundTrip ? "OK" : "MISSING")
 
   const removed = await fetch(`${base}/api/pty/${ptyID}`, { method: "DELETE" }).catch(() => null)
   console.log("cleanup ->", removed?.status ?? "n/a")
-  process.exit(0)
+  // A probe that never saw its own echo is a failed probe: say so in the exit
+  // code so it can gate a script instead of always reporting success.
+  process.exit(roundTrip ? 0 : 1)
 }, 6000)

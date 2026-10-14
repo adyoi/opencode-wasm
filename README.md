@@ -27,8 +27,8 @@ Yang bisa dilakukan: **menaruh runtime resmi opencode di dalam binary wasm**. Ha
 
 | | |
 | --- | --- |
-| **Chat** | session, streaming token, ganti model saat sesi berjalan |
-| **Pemilih model** | 39 model gratis opencode, group per provider, default diambil dari config server |
+| **Chat** | session, streaming token, ganti agent/model saat sesi berjalan |
+| **Pemilih** | satu dropdown: grup **Agent** (default · server, build, plan, general, explore) di atas model gratis opencode per provider, default diambil dari config server |
 | **Auto-allow** | balas otomatis permintaan izin (`permission.v2.asked`) → `always`, atau kartu izin manual |
 | **Shell** | PTY asli di server, dirender xterm.js, I/O lewat wasm |
 | **Web tools** | `webfetch` + `websearch` milik opencode, plus panel browser dengan tombol buka |
@@ -286,6 +286,12 @@ Semua jadi HTTPS, jadi tidak ada localhost dan tidak ada mixed content.
 Kartu connect punya kolom kredensial, dan **semua** panggilan API — termasuk prompt,
 izin, dan pembuatan PTY — mengirim header `Authorization`.
 
+Kredensial disimpan di `sessionStorage`, bukan `localStorage`: password server itu
+rahasia, dan `localStorage` menahannya di disk berbulan-bulan tempat skrip mana pun
+di origin yang sama bisa membacanya. Konsekuensinya, password tidak bertahan setelah
+tab ditutup — isi lagi kalau menyambung ulang. Salinan yang pernah ditulis versi lama
+dipindahkan lalu dihapus saat pertama kali dibaca.
+
 Satu batas yang tidak bisa dilewati: **WebSocket PTY tidak bisa mengirim header dari
 browser.** Jadi dengan server ber-password, chat berjalan normal tetapi tab Shell
 menolak dengan penjelasan eksplisit. Kalau shell dibutuhkan, jalankan server tanpa
@@ -304,9 +310,14 @@ oc.call("prompt", {...})  ──►    queue() → ticket       ──►   __oc
                                           │
 pump()                   ◄──    requests / replies     ◄──   __ocSettle(ticket, ok, json)
                              ◄──    events                ◄──   __ocEvent(json)
+hasWork()                ◄──    ada antrean tak perlu di-pump?
 ```
 
 Sisi wasm tidak pernah blocking dan tidak butuh async executor: `queue()` mengembalikan ticket, host melakukan *dispatch* dan mengosongkan hasil lewat `pump()`.
+
+`pump()` berjalan di `requestAnimationFrame`, jadi `hasWork()` diperiksa lebih dulu:
+ketika tidak ada apa pun yang perlu dikirim, halaman tidak perlu serialize dan parse
+JSON kosong enam puluh kali per detik.
 
 ## Isi repo
 
@@ -316,12 +327,16 @@ Sisi wasm tidak pernah blocking dan tidak butuh async executor: `queue()` mengem
 | `js/entry.js` | Bridge JS yang dibundle ke dalam wasm |
 | `js/build*.mjs` | Build bridge, xterm, dan bundel single-file |
 | `web/` | Demo: chat, shell, panel web |
-| `scripts/` | serve, smoke, config server, patch versi, cek model, probe PTY |
+| `scripts/` | serve, smoke, config server, patch versi (khusus snapshot dev), cek model, probe PTY |
 | `dist/` | `opencode-standalone.html` |
 
 ## Error gratis: `OpenCode 1.18.0 or newer is required`
 
-Snapshot `opencode-ai@dev` melaporkan versi `0.0.0-dev-<build>`, sedangkan gateway free tier menolak anything di bawah 1.18.0 dengan HTTP 426. Versi itu dibake saat build, jadi:
+Gateway free tier menolak server yang melaporkan versi di bawah 1.18.0 dengan HTTP 426.
+
+Rilis publik terbaru sudah lebih dari itu, jadi Casespaces sekarang memasang
+`opencode-ai@latest` dan tidak perlu apa-apa lagi. Dua alat di repo ini hanya
+dibutuhkan kalau kamu sengaja memasang snapshot dev:
 
 - **Fix utama** — `scripts/patch-version.mjs` menulis ulang literal versi di dalam binary dengan string yang panjangnya sama, jadi offset payload Bun tidak bergeser.
 - **Fallback** — kalau binary tak bisa dipatch, `scripts/config-demo.mjs` memasang header `user-agent` per model (gateway membaca versi dari sana), hanya bila versi server terdeteksi < 1.18.
@@ -330,18 +345,40 @@ Snapshot `opencode-ai@dev` melaporkan versi `0.0.0-dev-<build>`, sedangkan gatew
 
 Empat perbedaan antara `@opencode/client@2.0.28` dan server v2 terbaru ditemukan saat pengujian dan sudah ditangani:
 
-1. **Prompt** — client mengirim `{ text }`, server mau `{ prompt: { text } }` → fallback `fetch` langsung.
+1. **Prompt** — client mengirim `{ text }`, server mau `{ prompt: { text } }` → fallback `fetch` langsung. Versi client yang dilaporkan ke host dibaca dari `package.json` `@opencode/client` saat build, bukan ditulis manual, jadi tidak bisa melenceng dari paket yang benar-benar di-embed.
 2. **Nama event** — `session.next.*` dan `permission.v2.*`, bukan `session.text.delta` / `permission.asked`.
 3. **Payload event** — v2 membawanya di `properties`, bukan `data`.
 4. **Endpoint izin** — `POST /api/session/:id/permission/:rid/reply` dengan `{ reply }`.
+5. **Ganti agent** — `POST /api/session/:id/agent` dengan body `{ agent }` juga tidak punya method di client generated, jadi lewat `fetch` langsung seperti prompt.
+
+## Agent vs model
+
+Dropdown `#model` memegang dua hal berbeda, karena memang ada dua route berbeda di server:
+
+| Pilihan | Dikirim saat | Route |
+| --- | --- | --- |
+| `default · server` | `createSession({})` — biar config server yang menentukan | — |
+| `build` · `plan` · `general` · `explore` | `createSession({ agent })`, atau saat sesi jalan | `POST /api/session/:id/agent` |
+| model (`provider/id`) | `createSession({ model })`, atau saat sesi jalan | `POST /api/session/:id/model` |
+
+Nilai option agent memakai prefix `agent:` supaya tidak bentrok dengan `provider/id` —
+dan `localStorage` yang sudah berisi `provider/id` dari versi lama tetap terbaca.
+
+> `default · server` tidak bisa dipulihkan di tengah sesi: route-nya menuntut nama agent
+> yang konkret, jadi memilihnya hanya berlaku untuk sesi berikutnya. Halaman menyatakan
+> itu terang-terangan, bukan diam-diam mengabaikan.
+>
+> `compaction`, `summary`, dan `title` disembunyikan dari picker — itu agent internal
+> pipeline, bukan pilihan pengguna. Agent yang menandai dirinya `hidden` juga ikut
+> dihormati, dan server tanpa route `/agent` tetap jalan dengan picker model saja.
 
 ## Batasan
 
 - Yang jalan di browser: klien resmi, session, event stream, balasan izin. Yang tetap di server: loop agent, panggilan LLM, tool, SQLite.
-- Daftar model dari server bisa ribuan entri; picker menampilkan maksimal 250.
+- Daftar model dari server bisa ribuan entri; picker menampilkan maksimal 250. Urutannya disusun dulu (gratis di depan), baru dipotong, jadi model gratis yang muncul belakangan di katalog server tidak ikut terbuang. Grup **Agent** tidak ikut dipotong — jumlahnya segelintiran.
 - Free tier punya rate limit, dan sebagian model sudah deprecated di sisi gateway.
 - `resize` PTY tidak dikirim: API v2 tidak punya route resize.
-- Panel Web memakai iframe biasa, jadi situs dengan `X-Frame-Options`/`frame-ancestors` tidak bisa ditampilkan — tombol **Tab baru** tersedia sebagai jalan keluar.
+- Panel Web memakai iframe biasa, jadi situs dengan `X-Frame-Options`/`frame-ancestors` tidak bisa ditampilkan dan panelnya akan kosong.
 
 ## Lisensi
 

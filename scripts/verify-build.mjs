@@ -44,9 +44,14 @@ if (typeof globalThis.__oc?.ptyConnect !== "function") throw new Error("bridge i
 
 const client = new OpenCode()
 client.boot()
+// hasWork() gates the host's animation-frame loop, so an idle client that
+// reports work (or a busy one that does not) would spin or stall the page.
+if (client.hasWork()) throw new Error("a freshly booted client already reports work")
 const ticket = client.queue("info", "null")
+if (!client.hasWork()) throw new Error("hasWork() missed a queued request")
 const drained = JSON.parse(client.pump())
 if (drained.requests?.[0]?.ticket !== ticket) throw new Error("queue/pump round trip failed")
+if (client.hasWork()) throw new Error("drained client still reports work")
 
 const kib = (n) => `${(n / 1024).toFixed(1)} KiB`
 console.log(`wasm ok · ${kib(bytes.length)} · embedded runtime ${kib(runtimeBytes())} · queue ticket ${ticket}`)

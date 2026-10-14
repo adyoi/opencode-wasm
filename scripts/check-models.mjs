@@ -7,10 +7,19 @@ import { bootOpenCode } from "../web/bridge.js"
 const baseUrl = process.argv[2] ?? "http://127.0.0.1:4096"
 const limit = Number(process.argv[3] ?? 8)
 const waiting = new Map()
+const CALL_TIMEOUT = 20_000
 
 const wasm = await readFile(fileURLToPath(new URL("../web/pkg/opencode_wasm_bg.wasm", import.meta.url)))
 const oc = await bootOpenCode({ wasm })
-const call = (m, p = null) => new Promise((res, rej) => waiting.set(oc.call(m, p), { resolve: res, reject: rej }))
+const call = (m, p = null) =>
+  new Promise((resolve, reject) => {
+    const ticket = oc.call(m, p)
+    waiting.set(ticket, { resolve, reject })
+    setTimeout(() => {
+      if (!waiting.delete(ticket)) return
+      reject(new Error(`${m} timed out after ${CALL_TIMEOUT}ms`))
+    }, CALL_TIMEOUT)
+  })
 oc.on("reply", ({ ticket, ok, data, error }) => {
   const p = waiting.get(ticket)
   if (!p) return
@@ -18,24 +27,20 @@ oc.on("reply", ({ ticket, ok, data, error }) => {
   ok ? p.resolve(data) : p.reject(new Error(error))
 })
 
-const textByModel = new Map()
-oc.on("event", (evt) => {
-  if (evt?.type === "session.next.text.ended") textByModel.set(evt.data?.assistantMessageID, evt.data?.text)
-})
+try {
+  await call("open", { baseUrl })
+} catch (err) {
+  console.error(`cannot reach the opencode server at ${baseUrl}`)
+  console.error(`  ${err.message}`)
+  oc.stop()
+  process.exit(1)
+}
 
-await call("open", { baseUrl })
 const { data: models } = await call("models")
-const free = models.filter((m) => (m.cost ?? []).every((c) => !c.input && !c.output))
+// Same rule as the model picker in web/app.js: a model counts as free when
+// nothing about it costs anything, including cache reads.
+const free = models.filter((m) => (m.cost ?? []).every((c) => !c.input && !c.output && !c.cache?.read))
 console.log(`${free.length} free models, trying ${Math.min(limit, free.length)}\n`)
-
-const done = new Set()
-oc.on("event", (evt) => {
-  const type = evt?.type ?? ""
-  if (type === "session.step.failed" || type === "session.execution.failed") {
-    const id = evt.data?.assistantMessageID
-    if (id) done.add(id)
-  }
-})
 
 let ok = 0
 let failed = 0
@@ -44,7 +49,7 @@ for (const model of free.slice(0, limit)) {
   try {
     session = await call("createSession", { model: { id: model.id, providerID: model.providerID } })
   } catch (err) {
-    console.log(`${model.id.padEnd(34)} session failed`)
+    console.log(`${model.id.padEnd(34)} session failed: ${String(err.message).slice(0, 90)}`)
     failed++
     continue
   }
@@ -83,4 +88,6 @@ for (const model of free.slice(0, limit)) {
 
 console.log(`\n${ok} ok · ${failed} gagal`)
 oc.stop()
-process.exit(0)
+// Non-zero when nothing worked: this used to exit 0 even with every model
+// failing, so a wrapper script could not tell the two apart.
+process.exit(ok > 0 ? 0 : 1)

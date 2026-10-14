@@ -59,6 +59,9 @@ const outfile = join(outdir, "opencode-standalone.html")
 await writeFile(outfile, replaced, "utf8")
 
 const kib = (n) => `${(n / 1024).toFixed(1)} KiB`
-console.log(`dist/opencode-standalone.html  ${kib(replaced.length)}`)
+// Byte length, not `String.length`: the payload is text, so the two disagree
+// for every multi-byte character in the Indonesian copy.
+const bytes = Buffer.byteLength(replaced, "utf8")
+console.log(`dist/opencode-standalone.html  ${kib(bytes)}`)
 console.log(`  wasm ${kib(wasm.length)} (base64 ${kib(wasmBase64.length)}) · app ${kib(appCode.length)} · css ${kib(xtermCss.length)}`)
 console.log("  buka: start opencode-standalone.html  (server perlu --cors null)")

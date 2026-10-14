@@ -17,7 +17,49 @@
       let autoAllow = localStorage.getItem("opencode-auto-allow") !== "false"
 
       const kb = (n) => `${(n / 1024).toFixed(1)} KiB`
-      const scroll = () => main.scrollTo({ top: main.scrollHeight })
+
+      // Escaping for the few places that build HTML from values that can come
+      // from a URL: `?server=` and the remembered address are attacker-supplied,
+      // and both end up inside innerHTML in the connect card and its hints.
+      const esc = (value) =>
+        String(value ?? "").replace(
+          /[&<>"']/g,
+          (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch],
+        )
+
+      /**
+       * Streaming appends a delta per token, and every append used to force a
+       * synchronous layout. One scroll per animation frame is enough for a human
+       * to read, and a hidden tab gets it applied straight away because no frame
+       * is coming.
+       */
+      let scrollQueued = false
+      const scroll = () => {
+        const visible = typeof document === "undefined" || document.visibilityState === "visible"
+        if (!visible) {
+          main.scrollTop = main.scrollHeight
+          return
+        }
+        if (scrollQueued) return
+        scrollQueued = true
+        const run = () => {
+          scrollQueued = false
+          main.scrollTo({ top: main.scrollHeight })
+        }
+        if (globalThis.requestAnimationFrame) globalThis.requestAnimationFrame(run)
+        else run()
+      }
+
+      /**
+       * A long session emits thousands of messages and tool calls, and nothing
+       * reads either entry once its turn is over. Drop the oldest so a day-long
+       * session does not grow the page's memory without bound.
+       */
+      const TRACKED = 500
+      const remember = (map, key, value) => {
+        map.set(key, value)
+        if (map.size > TRACKED) map.delete(map.keys().next().value)
+      }
 
       /* ---------- rendering ---------- */
 
@@ -47,6 +89,8 @@
         const name = data.tool || data.name || "tool"
         const input = data.input ?? {}
         const isWeb = name === "webfetch" || name === "websearch"
+        // Always a string: every branch ends in one, so the caller can assign it
+        // straight to textContent.
         const detail =
           typeof input === "string"
             ? input
@@ -62,8 +106,7 @@
         node.className = `tool${isWeb ? " web" : ""}`
         node.innerHTML = `<span class="name"></span><span class="args"></span><span class="state">…</span>`
         node.querySelector(".name").textContent = isWeb ? (name === "webfetch" ? "↗" : "⌕") + " " + name : name
-        node.querySelector(".args").textContent =
-          typeof detail === "string" ? detail : JSON.stringify(detail ?? "")
+        node.querySelector(".args").textContent = detail
         thread.appendChild(node)
         scroll()
 
@@ -231,7 +274,7 @@
             const id = data.assistantMessageID || data.messageID || "last"
             const meta = ["assistant", data.agent].filter(Boolean).join(" · ")
             streaming = bubbles.get(id) ?? add("assistant", "", meta)
-            bubbles.set(id, streaming)
+            remember(bubbles, id, streaming)
             caret(true)
             break
           }
@@ -239,7 +282,7 @@
           case "session.text.delta": {
             const id = data.assistantMessageID || data.messageID || "last"
             const entry = bubbles.get(id) ?? (streaming ?? add("assistant", ""))
-            bubbles.set(id, entry)
+            remember(bubbles, id, entry)
             entry.text += data.delta ?? ""
             entry.body.textContent = entry.text
             scroll()
@@ -257,7 +300,7 @@
           }
 
           case "session.tool.called":
-            toolState.set(data.callID || data.tool, toolLine(data))
+            remember(toolState, data.callID || data.tool, toolLine(data))
             break
 
           case "session.tool.success":
@@ -295,13 +338,20 @@
 
           case "pty.closed":
             if (data.ptyID === ptyID) {
+              // Clear the id, otherwise the shell tab believes a live shell is
+              // still attached and never starts a replacement.
+              ptyID = null
               shellStatus("selesai", data.error ? "err" : "")
               if (term) term.writeln(`\r\n\x1b[90m[shell ditutup${data.error ? `: ${data.error}` : ""}]\x1b[0m`)
             }
             break
 
           default:
-            $("counterMeta").textContent = $("counterMeta").textContent.replace(/ · last:.*$/, "") + ` · last: ${type}`
+            // Keystrokes and the terminal text are dropped by pty.output, so the
+            // last-event line gets its own node: it used to be appended to the
+            // same node the reply handler rewrote, and the two kept erasing each
+            // other's text.
+            $("lastEvent").textContent = `last: ${type}`
         }
       }
 
@@ -338,12 +388,19 @@
 
       /* ---------- tabs ---------- */
 
+      const TABS = { chat: "tabChat", shell: "tabShell", web: "tabWeb" }
+      const TAB_ORDER = ["chat", "shell", "web"]
+
       async function showTab(name) {
         document.body.classList.toggle("shell", name === "shell")
         document.body.classList.toggle("web", name === "web")
-        $("tabChat").setAttribute("aria-selected", String(name === "chat"))
-        $("tabShell").setAttribute("aria-selected", String(name === "shell"))
-        $("tabWeb").setAttribute("aria-selected", String(name === "web"))
+        // Roving tabindex: only the selected tab is in the tab order, which is
+        // what the arrow-key handler below relies on to move between them.
+        for (const tab of TAB_ORDER) {
+          const button = $(TABS[tab])
+          button.setAttribute("aria-selected", String(tab === name))
+          button.tabIndex = tab === name ? 0 : -1
+        }
 
         if (name === "shell") {
           await ensureTerminal()
@@ -479,7 +536,13 @@
         const status = $("status")
         status.className = `status ${kind ?? ""}`
         $("statusText").textContent = label
+        // Both controls are session settings, so both follow the connection.
+        // The agent control is absent on servers without /agent.
         $("model").disabled = !value
+        const agentPicker = $("agent")
+        if (agentPicker) agentPicker.disabled = !value
+        const variantPicker = $("variant")
+        if (variantPicker) variantPicker.disabled = !value || variantPicker.hidden
         // The pill is the disconnect control online and the rescan trigger
         // offline, so it stays actionable in both states.
         status.classList.toggle("offline", !value)
@@ -497,8 +560,74 @@
 
       /* ---------- model picker ---------- */
 
-      const isFree = (model) => (model.cost ?? []).every((c) => !c.input && !c.output && !c.cache?.read)
+      /**
+       * A model counts as free when nothing about it costs anything.
+       *
+       * `cost` has been both shapes in the wild: an array of tiers and a single
+       * pricing object, and the API schema still calls it an object. Assuming
+       * one of them made the whole model list throw on a server that sent the
+       * other.
+       */
+      const isFree = (model) => {
+        const cost = model.cost
+        if (cost == null) return true
+        const free = (tier) => !tier.input && !tier.output && !tier.cache?.read
+        return Array.isArray(cost) ? cost.every(free) : free(cost)
+      }
       const isDeprecated = (model) => model.status === "deprecated"
+
+      // Two pickers, like the desktop client: one says *who* answers, the other
+      // says *with what*. They are independent server settings, and keeping them
+      // in one list made picking a model look like it picked an agent too.
+      const AGENT_KEY = "opencode-agent"
+      const MODEL_KEY = "opencode-model"
+      const VARIANTS_KEY = "opencode-variants"
+      const DEFAULT_AGENT = "default"
+
+      /** Pipeline-internal agents: never offered, they are not user choices. */
+      const HIDDEN_AGENTS = new Set(["compaction", "summary", "title"])
+
+      /**
+       * An earlier build kept agents and models in one list, under an "agent:"
+       * prefix in the same localStorage key. Move that choice to the agent
+       * control instead of leaving a value behind that no option can match —
+       * which would also have suppressed preselectModel() and pinned the
+       * session to whatever model happened to be listed first.
+       */
+      function migrateStoredSelection() {
+        const saved = localStorage.getItem(MODEL_KEY)
+        if (!saved?.startsWith("agent:")) return
+        const agent = saved.slice("agent:".length)
+        if (agent !== DEFAULT_AGENT && !localStorage.getItem(AGENT_KEY)) localStorage.setItem(AGENT_KEY, agent)
+        localStorage.removeItem(MODEL_KEY)
+      }
+
+      function fillAgents(agentList = []) {
+        const picker = $("agent")
+        picker.innerHTML = ""
+        // "default" means: send nothing and let the server's own configuration
+        // decide. It has to be the first entry so a fresh visit starts the way
+        // the server is configured rather than the way this page guesses.
+        const agents = agentList.filter((a) => !a.hidden && !HIDDEN_AGENTS.has(a.id) && a.id !== DEFAULT_AGENT)
+        if (!agents.length) {
+          // No /agent route on this server: the control would have nothing to
+          // offer, so it is removed rather than left as an empty dead box.
+          picker.remove()
+          return null
+        }
+        for (const agent of [{ id: DEFAULT_AGENT, description: "Ikuti konfigurasi server" }, ...agents]) {
+          const option = document.createElement("option")
+          option.value = agent.id
+          option.textContent = agent.id
+          option.title = agent.description ?? ""
+          picker.appendChild(option)
+        }
+        picker.title = "Agent"
+
+        const saved = localStorage.getItem(AGENT_KEY)
+        picker.value = agents.some((a) => a.id === saved) ? saved : DEFAULT_AGENT
+        return picker.value
+      }
 
       function fillModels(list) {
         const picker = $("model")
@@ -506,17 +635,22 @@
         models.clear()
 
         // The full models.dev catalogue can run into thousands of entries, so
-        // show the free ones plus the curated provider, capped for the DOM.
+        // keep the free ones plus the curated provider, then cap for the DOM.
         // Models the server flags as deprecated are hidden by default.
         const curated = list.filter((m) => m.providerID === "opencode")
-        const usable = [...new Map([...list.filter(isFree), ...curated].map((m) => [`${m.providerID}/${m.id}`, m])).values()]
-          .filter((m) => !isDeprecated(m))
-          .slice(0, 250)
+        const candidates = [...new Map([...list.filter(isFree), ...curated].map((m) => [`${m.providerID}/${m.id}`, m])).values()].filter(
+          (m) => !isDeprecated(m),
+        )
 
-        const sorted = [...usable].sort((a, b) => {
-          const free = Number(isFree(b)) - Number(isFree(a))
-          return free !== 0 ? free : a.id.localeCompare(b.id)
-        })
+        // Sort before capping. Capping first threw away whatever the catalogue
+        // happened to list late, free models included, purely because of the
+        // order the server returned them in.
+        const sorted = candidates
+          .sort((a, b) => {
+            const free = Number(isFree(b)) - Number(isFree(a))
+            return free !== 0 ? free : a.id.localeCompare(b.id)
+          })
+          .slice(0, 250)
 
         const groups = new Map()
         for (const model of sorted) {
@@ -537,33 +671,160 @@
           }
           picker.appendChild(group)
         }
-        picker.title = `${models.size} dari ${list.length} model`
+        picker.title = `${models.size} dari ${candidates.length} lolos filter · ${list.length} dari server`
 
-        const saved = localStorage.getItem("opencode-model")
         // A previously chosen model may have become deprecated; fall back cleanly.
+        const saved = localStorage.getItem(MODEL_KEY)
         if (saved && models.has(saved)) picker.value = saved
         if (!picker.value) picker.value = picker.options[0]?.value ?? ""
         return picker.value
       }
 
+      /**
+       * Variants live on the effective provider config, not on /api/model.
+       * /api/model ships `"variants": []` for every entry even when the model
+       * really has low/medium/high, so /config/providers is the only place they
+       * show up. Merging them in here means one lookup wherever a model is read.
+       */
+      async function loadVariants() {
+        const out = await call("configProviders")
+          .then((out2) => out2?.providers ?? out2?.data?.providers ?? null)
+          .catch(() => null)
+        if (!out) return 0
+        let found = 0
+        for (const provider of Object.values(out)) {
+          for (const [id, model] of Object.entries(provider?.models ?? {})) {
+            const variants = model?.variants
+            if (!variants || !Object.keys(variants).length) continue
+            const entry = models.get(`${provider.id}/${id}`)
+            if (!entry) continue
+            entry.variants = variants
+            found++
+          }
+        }
+        return found
+      }
+
       /** Preselect the model the server is configured to use, if we know it. */
-      function preselect(defaultKey) {
+      function preselectModel(defaultKey) {
         const picker = $("model")
-        if (localStorage.getItem("opencode-model")) return
-        if (defaultKey && models.has(defaultKey)) picker.value = defaultKey
-        else if (!picker.value) picker.value = picker.options[0]?.value ?? ""
+        // Presetting can move the picker, so the variant list is rebuilt after.
+        if (!localStorage.getItem(MODEL_KEY) && defaultKey && models.has(defaultKey)) picker.value = defaultKey
+        fillVariants()
+      }
+
+      /* ---------- variants ---------- */
+
+      /** `{ "provider/id": "high" }`, so a per-model choice survives switching. */
+      function rememberedVariants() {
+        try {
+          return JSON.parse(localStorage.getItem(VARIANTS_KEY) ?? "{}") ?? {}
+        } catch {
+          return {}
+        }
+      }
+
+      function rememberVariant(modelKey, variant) {
+        const all = rememberedVariants()
+        if (variant) all[modelKey] = variant
+        else delete all[modelKey]
+        try {
+          localStorage.setItem(VARIANTS_KEY, JSON.stringify(all))
+        } catch {
+          /* a remembered variant is a nicety, never a reason to break the page */
+        }
+      }
+
+      /**
+       * Variants are declared per model (`model.variants`), and most free models
+       * declare none. When there is nothing to pick the control is hidden rather
+       * than left as an empty box, so the footer only grows when it means
+       * something.
+       */
+      function fillVariants() {
+        const picker = $("variant")
+        const model = models.get($("model").value)
+        const variants = model?.variants ?? {}
+        const names = Object.keys(variants)
+
+        picker.innerHTML = ""
+        if (!names.length) {
+          picker.hidden = true
+          picker.value = ""
+          return null
+        }
+
+        picker.hidden = false
+        const options = [{ value: "", label: "default", title: "Tanpa varian tambahan" }]
+        for (const name of names) {
+          const detail = variants[name] ?? {}
+          // Real variants look like { reasoningEffort: "high" }; a configured one
+          // can carry a name or a description instead.
+          const title = detail.description ?? (detail.reasoningEffort ? `reasoningEffort: ${detail.reasoningEffort}` : name)
+          options.push({ value: name, label: detail.name ?? name, title })
+        }
+        for (const option of options) {
+          const node = document.createElement("option")
+          node.value = option.value
+          node.textContent = option.label
+          // Assigning undefined here would stringify to the text "undefined".
+          node.title = option.title ?? ""
+          picker.appendChild(node)
+        }
+        picker.title = "Varian dari model yang dipilih"
+
+        const remembered = rememberedVariants()[$("model").value]
+        picker.value = names.includes(remembered) ? remembered : ""
+        return picker.value
+      }
+
+      const chosenAgent = () => {
+        const picker = $("agent")
+        // The control is removed on servers without /agent; there is nothing
+        // to choose then, and the session simply uses the server default.
+        const agent = picker?.value && picker.value !== DEFAULT_AGENT ? picker.value : null
+        return agent
       }
 
       const chosenModel = () => {
-        const key = $("model").value
-        const model = models.get(key)
+        const model = models.get($("model").value)
         return model ? { id: model.id, providerID: model.providerID } : null
+      }
+
+      const chosenVariant = () => $("variant")?.hidden ? null : $("variant").value || null
+
+      /** A `ModelRef`: id + provider, plus the variant when one is picked. */
+      function modelRef() {
+        const model = chosenModel()
+        if (!model) return null
+        const variant = chosenVariant()
+        return variant ? { ...model, variant } : model
+      }
+
+      /** Body for `createSession`; "default" leaves the key out entirely. */
+      function sessionInput() {
+        const input = {}
+        const agent = chosenAgent()
+        const model = modelRef()
+        if (agent) input.agent = agent
+        if (model) input.model = model
+        return input
+      }
+
+      /** Short description of the current pick, for the connect banner. */
+      function selectionSummary() {
+        const parts = []
+        const agent = chosenAgent()
+        parts.push(agent ?? "default")
+        const model = modelRef()
+        if (model) parts.push(model.variant ? `${model.id}/${model.variant}` : model.id)
+        return parts.join(" · ")
       }
 
       /* ---------- flow ---------- */
 
-      async function startSession(model) {
-        const session = await call("createSession", model ? { model } : {})
+      async function startSession() {
+        const session = await call("createSession", sessionInput())
         sessionID = session?.id ?? session?.sessionID ?? null
         oc.remember(sessionID ?? "")
         $("sessionMeta").textContent = sessionID ? `ses ${sessionID.slice(0, 12)}…` : ""
@@ -575,14 +836,42 @@
       const basicHeader = (username, password) =>
         `Basic ${btoa(`${username || "opencode"}:${password}`)}`
 
+      /**
+       * Credentials live in sessionStorage, not localStorage: a server password
+       * is a secret, and localStorage keeps it on disk for months where any
+       * script on the origin can read it. A copy written by an older build is
+       * migrated on first read and then deleted, so the plaintext-at-rest version
+       * disappears instead of lingering.
+       */
+      function loadCredentials() {
+        let raw = null
+        try {
+          const legacy = localStorage.getItem(CRED_KEY)
+          raw = sessionStorage.getItem(CRED_KEY) ?? legacy
+          if (legacy) localStorage.removeItem(CRED_KEY)
+        } catch {
+          /* private mode / disabled storage: just connect without it */
+        }
+        try {
+          return JSON.parse(raw ?? "null")
+        } catch {
+          return null
+        }
+      }
+
+      function saveCredentials(value) {
+        try {
+          if (value) sessionStorage.setItem(CRED_KEY, JSON.stringify(value))
+          else sessionStorage.removeItem(CRED_KEY)
+        } catch {
+          /* nothing to do; the password is still used for this connection */
+        }
+      }
+
       /** Credentials remembered from an earlier visit, used when no card is shown. */
       function storedCredentials() {
-        try {
-          const saved = JSON.parse(localStorage.getItem(CRED_KEY) ?? "null")
-          return { username: saved?.username ?? "", password: saved?.password ?? "" }
-        } catch {
-          return { username: "", password: "" }
-        }
+        const saved = loadCredentials()
+        return { username: saved?.username ?? "", password: saved?.password ?? "" }
       }
 
       /**
@@ -598,14 +887,21 @@
         const username = ($("user")?.value ?? "").trim() || stored.username
         const password = $("pass")?.value ?? stored.password
         const headers = password ? { Authorization: basicHeader(username, password) } : {}
-        if (password) localStorage.setItem(CRED_KEY, JSON.stringify({ username, password }))
-        else localStorage.removeItem(CRED_KEY)
+        saveCredentials(password ? { username, password } : null)
 
         setConnected(false, "menyambung…", "")
         try {
           await call("open", { baseUrl: url, headers })
           const list = (await call("models"))?.data ?? []
+          // Agents are optional: an older server has no /agent route, and the
+          // agent control removes itself rather than sitting there empty.
+          const agentList = await call("agents")
+            .then((out) => (out?.data ?? out ?? []).filter((a) => a && a.id))
+            .catch(() => [])
+          migrateStoredSelection()
+          fillAgents(agentList)
           fillModels(list)
+          await loadVariants()
 
           let defaultKey = null
           try {
@@ -613,12 +909,12 @@
           } catch {
             /* older builds have no config route; fall back to the first entry */
           }
-          preselect(defaultKey)
+          preselectModel(defaultKey)
 
           thread.innerHTML = ""
-          await startSession(chosenModel())
+          await startSession()
           setConnected(true, "tersambung", "on")
-          system(`terhubung ke ${url} · ${$("model").title}`)
+          system(`terhubung ke ${url} · ${selectionSummary()}`)
           if (document.body.classList.contains("shell")) await startShell()
         } catch (err) {
           setConnected(false, "gagal", "err")
@@ -644,7 +940,10 @@
        * panggilan yang menggantung, lalu kembali ke kartu sambung.
        */
       async function disconnect() {
-        if (!connected) return
+        // A live shell outlives a lost connection, so the teardown has to run
+        // even when the flag already says "not connected" — otherwise the PTY
+        // stays alive on the server with nothing left to close it.
+        if (!connected && !ptyID) return
         if (ptyID) {
           const closing = ptyID
           ptyID = null
@@ -696,7 +995,7 @@
             <h2>Sambungkan ke server opencode</h2>
             <p>Runtime agent berjalan di server; klien resminya ada di dalam file wasm ini.</p>
             <div class="row">
-              <input id="url" value="${saved.replace(/"/g, "&quot;")}" spellcheck="false" />
+              <input id="url" value="${esc(saved)}" spellcheck="false" />
               <button id="connect" class="primary">Sambung</button>
               <button id="rescan" title="Cari server opencode di alamat yang biasa">Cari lagi</button>
             </div>
@@ -706,17 +1005,17 @@
             </div>
             <p class="hint" id="connectHint"></p>
           </div>`
-        $("connect").onclick = connect
+        // A bare reference would hand connect() the click event as urlOverride, and
+        // (event ?? value).trim() is not a function.
+        $("connect").onclick = () => connect()
         $("rescan").onclick = () => rescan()
         $("url").onkeydown = (e) => e.key === "Enter" && connect()
 
-        try {
-          const saved2 = JSON.parse(localStorage.getItem(CRED_KEY) ?? "null")
-          if (saved2) {
-            $("user").value = saved2.username ?? ""
-            $("pass").value = saved2.password ?? ""
-          }
-        } catch {}
+        const remembered = loadCredentials()
+        if (remembered) {
+          $("user").value = remembered.username ?? ""
+          $("pass").value = remembered.password ?? ""
+        }
 
         // Pages is HTTPS, so a plain ws:// PTY socket is blocked as mixed content.
         const hints = []
@@ -726,12 +1025,12 @@
         const savedIsLoopback = LOOPBACK.includes(savedHost)
         if (!servedLocally && savedIsLoopback) {
           hints.push(
-            `Halaman ini dibuka dari <code>${location.hostname}</code>, jadi <code>${savedHost}</code> menunjuk ke komputer ini — bukan ke mesin tempat server berjalan. Buka dari komputer yang sama, atau isi URL server yang bisa dijangkau.`,
+            `Halaman ini dibuka dari <code>${esc(location.hostname)}</code>, jadi <code>${esc(savedHost)}</code> menunjuk ke komputer ini — bukan ke mesin tempat server berjalan. Buka dari komputer yang sama, atau isi URL server yang bisa dijangkau.`,
           )
         }
         if (!servedLocally && !savedIsLoopback && savedHost) {
           hints.push(
-            `<code>${savedHost}</code> hanya menjawab kalau servernya dijalankan dengan <code>--hostname 0.0.0.0</code>. Kalau tidak, pakai <code>127.0.0.1</code> dari komputer yang sama.`,
+            `<code>${esc(savedHost)}</code> hanya menjawab kalau servernya dijalankan dengan <code>--hostname 0.0.0.0</code>. Kalau tidak, pakai <code>127.0.0.1</code> dari komputer yang sama.`,
           )
         }
         if (location.protocol === "https:" && saved.startsWith("http://")) {
@@ -787,17 +1086,18 @@
         if (query) list.push(query)
         if (saved) list.push(saved)
 
+        // Keep any port the ?server= URL already used, then the common ones.
+        let port = ""
+        try {
+          port = query ? new URL(query).port : ""
+        } catch {
+          /* a malformed ?server= is not worth guessing from */
+        }
+
         const hosts = []
         if (location.hostname) hosts.push(location.hostname)
         for (const host of ["127.0.0.1", "localhost"]) if (!hosts.includes(host)) hosts.push(host)
         for (const host of hosts) {
-          // keep any port the URL already used, then the common ones
-          let port = ""
-          try {
-            port = query ? new URL(query).port : ""
-          } catch {
-            /* a malformed ?server= is not worth guessing from */
-          }
           if (port && port !== "4096") list.push(`http://${host}:${port}`)
           for (const p of PROBE_PORTS) list.push(`http://${host}:${p}`)
         }
@@ -852,7 +1152,7 @@
           }
           if (!connected) setConnected(false, "butuh password", "")
           showConnectCard(
-            `Server ditemukan di <code>${found.url}</code>, tapi ia memakai password. Isi kolom di bawah lalu tekan <b>Sambung</b>.`,
+            `Server ditemukan di <code>${esc(found.url)}</code>, tapi ia memakai password. Isi kolom di bawah lalu tekan <b>Sambung</b>.`,
             found.url,
           )
           return found.url
@@ -879,12 +1179,58 @@
         }
       }
 
+      /**
+       * Push the agent control's new value onto the running session.
+       */
+      async function switchAgent() {
+        const agent = $("agent")?.value ?? DEFAULT_AGENT
+        // "default" is not remembered as a choice: it is what a fresh visit
+        // gets anyway, and storing it would only make "no preference" sticky.
+        if (agent === DEFAULT_AGENT) localStorage.removeItem(AGENT_KEY)
+        else localStorage.setItem(AGENT_KEY, agent)
+        if (!sessionID) return
+        if (agent === DEFAULT_AGENT) {
+          // The API has no "unset": every route wants a concrete agent name,
+          // so "default" can only be honoured by the next session.
+          system("agent → default · berlaku untuk sesi berikutnya")
+          return
+        }
+        try {
+          await call("setAgent", { sessionID, agent })
+          system(`agent → ${agent}`)
+        } catch (err) {
+          add("error", err.message)
+        }
+      }
+
+      /** Push the model control's new value onto the running session. */
       async function switchModel() {
-        const model = chosenModel()
-        localStorage.setItem("opencode-model", $("model").value)
+        localStorage.setItem(MODEL_KEY, $("model").value)
+        // The variant list belongs to the model, so it has to be rebuilt before
+        // the ModelRef is built — otherwise the old variant would be sent along
+        // with the new model.
+        fillVariants()
+        const model = modelRef()
         if (!sessionID || !model) return
         try {
           await call("switchModel", { sessionID, model })
+        } catch (err) {
+          add("error", err.message)
+        }
+      }
+
+      /**
+       * Push a variant change. The API has no variant-only route: variants ride
+       * along on the ModelRef, so this re-sends the model with the new variant.
+       */
+      async function switchVariant() {
+        const modelKey = $("model").value
+        rememberVariant(modelKey, $("variant").value)
+        const model = modelRef()
+        if (!sessionID || !model) return
+        try {
+          await call("switchModel", { sessionID, model })
+          system(`varian → ${model.variant}`)
         } catch (err) {
           add("error", err.message)
         }
@@ -924,7 +1270,9 @@
       $("prompt").onkeydown = (e) => {
         if (e.key === "Enter") send()
       }
+      $("agent").onchange = switchAgent
       $("model").onchange = switchModel
+      $("variant").onchange = switchVariant
 
       $("autoAllow").setAttribute("aria-pressed", String(autoAllow))
       $("autoAllow").onclick = () => {
@@ -936,13 +1284,27 @@
       $("tabChat").onclick = () => showTab("chat")
       $("tabShell").onclick = () => showTab("shell")
       $("tabWeb").onclick = () => showTab("web")
+      // Arrow keys move between tabs, as the tablist pattern expects. Without this
+      // only the Chat tab was reachable by keyboard.
+      document.querySelector(".tabs").onkeydown = (e) => {
+        const current = TAB_ORDER.find((tab) => TABS[tab] === e.target.id) ?? "chat"
+        const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key]
+        let next = null
+        if (step !== undefined) next = (TAB_ORDER.indexOf(current) + step + TAB_ORDER.length) % TAB_ORDER.length
+        else if (e.key === "Home") next = 0
+        else if (e.key === "End") next = TAB_ORDER.length - 1
+        if (next === null) return
+        e.preventDefault()
+        showTab(TAB_ORDER[next])
+        $(TABS[TAB_ORDER[next]]).focus()
+      }
       $("shellRestart").onclick = startShell
       $("shellClear").onclick = () => term?.clear()
 
       $("webBack").onclick = () => step(-1)
       $("webFwd").onclick = () => step(1)
       $("webReload").onclick = () => openInPanel($("webUrl").value, { push: false })
-      $("webExternal").onclick = () => window.open($("webUrl").value, "_blank", "noopener")
+      $("webGo").onclick = () => openInPanel($("webUrl").value)
       $("webUrl").onkeydown = (e) => {
         if (e.key === "Enter") openInPanel($("webUrl").value)
       }
@@ -950,11 +1312,20 @@
         button.onclick = () => openInPanel(button.dataset.url)
       }
 
-      // Best effort: detach the websocket when the page goes away.
+      // Best effort: detach the websocket when the page goes away. This calls the
+      // embedded runtime directly instead of queueing a request: by the time
+      // pagehide fires the animation frame loop is gone, so a queued ptyClose
+      // would sit in the wasm outbox forever and leave the shell running on the
+      // server.
       globalThis.addEventListener("pagehide", () => {
         if (!ptyID) return
-        const ticket = oc.call("ptyClose", { ptyID })
-        waiting.delete(ticket)
+        const closing = ptyID
+        ptyID = null
+        try {
+          void globalThis.__oc?.ptyClose?.({ ptyID: closing })
+        } catch (err) {
+          console.warn("[opencode-wasm] pty close on pagehide failed", err)
+        }
       })
 
       // No lookup required: find a running server and connect on its own.

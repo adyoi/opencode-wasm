@@ -106,11 +106,6 @@ pub fn runtime_bytes() -> usize {
 /// Called by the host once a settled call produced a result.
 #[wasm_bindgen(js_name = settle)]
 pub fn settle(ticket: u32, ok: bool, payload: &str) {
-    STATE.with(|s| {
-        let mut s = s.borrow_mut();
-        s.pending = s.pending.saturating_sub(1);
-    });
-
     let entry = if ok {
         Reply {
             ticket,
@@ -130,8 +125,10 @@ pub fn settle(ticket: u32, ok: bool, payload: &str) {
             }),
         }
     };
+
     STATE.with(|s| {
         let mut s = s.borrow_mut();
+        s.pending = s.pending.saturating_sub(1);
         s.replies += 1;
         s.inbox.push_back(Entry::Reply(entry));
     });
@@ -175,6 +172,10 @@ impl OpenCode {
     }
 
     /// Mark the embedded JS runtime as evaluated; clears all pending state.
+    ///
+    /// The remembered session id is dropped too: `boot()` is what re-attaches a
+    /// fresh wasm instance to the page, so a session left over from the previous
+    /// one would be reported by `pump()` and `session()`.
     pub fn boot(&self) -> bool {
         self.runtime_evaluated.set(true);
         STATE.with(|s| {
@@ -183,8 +184,22 @@ impl OpenCode {
             s.inbox.clear();
             s.next_ticket = 0;
             s.pending = 0;
+            s.session = None;
         });
         true
+    }
+
+    /// True when a request is queued or a reply/event is waiting to be drained.
+    ///
+    /// The host polls this on every animation frame, so the idle case must stay
+    /// cheap: it lets `pump()` skip a JSON serialise/parse round trip that would
+    /// otherwise happen 60 times a second while nothing is going on.
+    #[wasm_bindgen(js_name = hasWork)]
+    pub fn has_work(&self) -> bool {
+        STATE.with(|s| {
+            let s = s.borrow();
+            !s.outbox.is_empty() || !s.inbox.is_empty()
+        })
     }
 
     /// Ask the host to invoke `method` on the embedded runtime with `payload`
@@ -207,7 +222,7 @@ impl OpenCode {
 
     /// Drain queued requests, settled replies and streamed events as JSON.
     pub fn pump(&self) -> String {
-        let (requests, replies, events, session) = STATE.with(|s| {
+        let drained = STATE.with(|s| {
             let mut s = s.borrow_mut();
             let mut replies: Vec<Reply> = Vec::new();
             let mut events: Vec<Value> = Vec::new();
@@ -217,17 +232,17 @@ impl OpenCode {
                     Entry::Reply(reply) => replies.push(reply),
                 }
             }
-            let requests = s.outbox.drain(..).collect();
-            (requests, replies, events, s.session.clone())
+            Drain {
+                requests: s.outbox.drain(..).collect(),
+                replies,
+                events,
+                session: s.session.clone(),
+            }
         });
 
-        json(serde_json::to_value(Drain {
-            requests,
-            replies,
-            events,
-            session,
-        })
-        .unwrap_or(Value::Null))
+        // Serialise straight to a string. Going through Value first would build
+        // the whole tree a second time for no benefit on a hot path.
+        serde_json::to_string(&drained).unwrap_or_else(|_| "null".to_owned())
     }
 
     /// Remember the active session id inside wasm memory.
@@ -315,5 +330,43 @@ mod tests {
         let drained: Value = serde_json::from_str(&client.pump()).unwrap();
         assert_eq!(drained["replies"][0]["ok"], false);
         assert!(drained["replies"][0]["error"].as_str().unwrap().contains("nope"));
+    }
+
+    #[test]
+    fn boot_drops_the_previous_session() {
+        let client = OpenCode::new();
+        client.boot();
+        client.remember("ses_old");
+        assert_eq!(client.session().as_deref(), Some("ses_old"));
+
+        // Re-booting is how the page attaches a new wasm instance; the previous
+        // session id must not survive into the next drain.
+        client.boot();
+        assert_eq!(client.session(), None);
+        let drained: Value = serde_json::from_str(&client.pump()).unwrap();
+        assert_eq!(drained["session"], Value::Null);
+    }
+
+    #[test]
+    fn has_work_tracks_the_queues() {
+        let client = OpenCode::new();
+        client.boot();
+        assert!(!client.has_work(), "a freshly booted module is idle");
+
+        let ticket = client.queue("info", "null");
+        assert!(client.has_work(), "a queued request counts as work");
+        let _ = client.pump();
+        assert!(!client.has_work(), "draining the outbox empties it again");
+
+        settle(ticket, true, "null");
+        assert!(client.has_work(), "a settled reply is work until drained");
+        let _ = client.pump();
+        assert!(!client.has_work());
+
+        event("{\"type\":\"session.idle\"}");
+        assert!(client.has_work());
+        let drained: Value = serde_json::from_str(&client.pump()).unwrap();
+        assert_eq!(drained["events"][0]["type"], "session.idle");
+        assert!(!client.has_work());
     }
 }
