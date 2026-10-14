@@ -131,10 +131,18 @@ Situsnya terbit dari **GitHub Actions**, bukan dari isi branch
 (**Settings → Pages → Source: GitHub Actions**).
 
 ```
-https://adyoi.github.io/opencode-wasm/          → redirect ke demo
+https://adyoi.github.io/opencode-wasm/          → redirect ke demo di jaringan lokal
 https://adyoi.github.io/opencode-wasm/web/      → demo (chat · shell · web)
 https://adyoi.github.io/opencode-wasm/dist/opencode-standalone.html  → satu file
 ```
+
+> **Root meneruskan ke LAN.** `index.html` di root melakukan
+> `location.replace` ke `http://10.1.0.106:5295/web/` — demo yang berjalan di
+> jaringan lokal. GitHub Pages bersifat statis, jadi tidak ada proxy dari
+> `adyoi.github.io` ke jaringan pribadi; redirect adalah satu-satunya opsi, dan
+> hanya berhasil dari dalam jaringan itu. Pengunjung dari luar melihat halaman
+> penjelasan dengan tautan ke `./web/` dan `./dist/`. Ubah `index.html` kalau
+> alamat demo Anda berbeda.
 
 Setiap push ke `main`, `.github/workflows/deploy-pages.yml` membangun ulang dari
 sumber, menjalankan test Rust + cek wasm, lalu menerbitkan hasilnya. Jadi yang

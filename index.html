@@ -1,17 +1,60 @@
 <!doctype html>
-<html lang="en">
+<html lang="id">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>opencode · wasm</title>
-    <meta http-equiv="refresh" content="0; url=./web/" />
-    <link rel="canonical" href="./web/" />
+    <!--
+      Halaman ini meneruskan ke demo yang berjalan di jaringan lokal.
+
+      GitHub Pages adalah hosting statis: tidak ada proxy dari
+      adyoi.github.io ke jaringan pribadi, jadi satu-satunya yang bisa dilakukan
+      halaman ini adalah redirect. Redirect hanya berhasil kalau browser-nya
+      sedang berada di jaringan yang sama dengan 10.1.0.106 -- dari luar akan
+      muncul halaman server tidak bisa dijangkau, dan tautan di bawah adalah
+      jalan keluarnya.
+    -->
+    <meta http-equiv="refresh" content="0; url=http://10.1.0.106:5295/web/" />
+    <meta name="robots" content="noindex" />
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0a0b0d;
+        color: #e8eaed;
+        font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { max-width: 46ch; padding: 24px; }
+      h1 { font-size: 17px; font-weight: 600; margin: 0 0 10px; }
+      p { color: #8b9099; font-size: 13.5px; margin: 0 0 14px; }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        color: #7c9cff;
+      }
+      a { color: #7c9cff; }
+      ul { color: #8b9099; font-size: 13.5px; padding-left: 18px; }
+      li { margin-bottom: 6px; }
+    </style>
   </head>
   <body>
-    <p>Memuat demo… <a href="./web/">buka manual</a></p>
+    <main>
+      <h1>Meneruskan ke demo di jaringan lokal…</h1>
+      <p>
+        Demo berjalan di <code>http://10.1.0.106:5295</code>. Kalau halaman ini tidak berganti, berarti
+        perangkat ini tidak berada di jaringan tersebut.
+      </p>
+      <ul>
+        <li><a href="http://10.1.0.106:5295/web/">Buka demo lokal</a></li>
+        <li><a href="./web/">Demo yang di-host GitHub Pages</a> — butuh <code>opencode serve</code> yang bisa dijangkau browser ini</li>
+        <li><a href="./dist/opencode-standalone.html">Berkas tunggal</a> — satu file HTML, tanpa server web</li>
+      </ul>
+    </main>
     <script>
-      // Keep the single-page demo one click away even when GitHub Pages
-      // publishes the repository root instead of the CI artifact.
-      location.replace("./web/")
+      location.replace("http://10.1.0.106:5295/web/")
     </script>
   </body>
 </html>
