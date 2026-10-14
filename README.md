@@ -352,7 +352,7 @@ dibutuhkan kalau kamu sengaja memasang snapshot dev:
 
 Empat perbedaan antara `@opencode/client@2.0.28` dan server v2 terbaru ditemukan saat pengujian dan sudah ditangani:
 
-1. **Prompt** — client mengirim `{ text }`, server mau `{ prompt: { text } }` → fallback `fetch` langsung. Versi client yang dilaporkan ke host dibaca dari `package.json` `@opencode/client` saat build, bukan ditulis manual, jadi tidak bisa melenceng dari paket yang benar-benar di-embed.
+1. **Prompt** — client mengirim `{ text }`, server v1.19.0 mau `{ prompt: { text } }`. Bentuk yang salah tidak selalu dijawab dengan pesan yang jelas: server lama membalas `Missing key ["prompt"]`, server 1.19.0 membalas **400 kosong**. Fallback karena itu memicu pada `Missing key` maupun 4xx apa pun, dan bentuk yang berhasil disimpan di `sessionStorage` supaya reload tidak mengulang request yang pasti ditolak. Versi client yang dilaporkan ke host dibaca dari `package.json` `@opencode/client` saat build, bukan ditulis manual, jadi tidak bisa melenceng dari paket yang benar-benar di-embed.
 2. **Nama event** — `session.next.*` dan `permission.v2.*`, bukan `session.text.delta` / `permission.asked`.
 3. **Payload event** — v2 membawanya di `properties`, bukan `data`.
 4. **Endpoint izin** — `POST /api/session/:id/permission/:rid/reply` dengan `{ reply }`.

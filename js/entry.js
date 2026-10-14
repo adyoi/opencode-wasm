@@ -56,20 +56,52 @@ function detachSocket() {
  * Newer server builds wrap the prompt payload in `{ prompt: { text } }`, while the
  * published client (2.0.28) still sends the flattened `{ text }` shape and drops
  * unknown keys. Try the generated client first, then talk to the endpoint
- * directly when the server answers `Missing key ["prompt"]` — and remember the
- * shape so later prompts skip the doomed request.
+ * directly — and remember the shape so later prompts skip the doomed request.
+ *
+ * The mismatch is not reported one way. Depending on the server build the flat
+ * shape comes back as a zod `Missing key ["prompt"]` or as a bare HTTP 400, and
+ * matching only the first left prompts failing with nothing the user could act
+ * on. Any 4xx is worth one retry with the wrapped shape; the retry is free
+ * because the flat request was rejected before it did any work.
  */
-let promptStyle = null
+let promptStyle = readPromptStyle()
+
+const SHAPE_MISMATCH = /Missing key|UnexpectedStatus:\s*4\d\d|UnexpectedStatus:4\d\d|status(?: code)?:?\s*4\d\d/i
+
+/**
+ * The learned shape is kept in sessionStorage so a reload does not pay the
+ * rejected first attempt again — it shows up as a 400 in the network panel
+ * every time the page starts fresh.
+ */
+const PROMPT_STYLE_KEY = "opencode-prompt-style"
+
+function readPromptStyle() {
+  try {
+    return globalThis.sessionStorage?.getItem(PROMPT_STYLE_KEY) === "flat" ? "flat" : null
+  } catch {
+    return null
+  }
+}
+
+function rememberPromptStyle(style) {
+  promptStyle = style
+  try {
+    if (style === "flat") globalThis.sessionStorage?.setItem(PROMPT_STYLE_KEY, "flat")
+    else globalThis.sessionStorage?.removeItem(PROMPT_STYLE_KEY)
+  } catch {
+    /* no storage: the in-memory value still holds for this page */
+  }
+}
 
 async function sendPrompt(sessionID, text) {
   if (promptStyle !== "wrapped") {
     try {
       const result = await require_().session.prompt({ sessionID, text })
-      promptStyle = "flat"
+      rememberPromptStyle("flat")
       return result
     } catch (err) {
-      if (!/Missing key/i.test(String(err?.message ?? err))) throw err
-      promptStyle = "wrapped"
+      if (!SHAPE_MISMATCH.test(String(err?.message ?? err))) throw err
+      rememberPromptStyle("wrapped")
     }
   }
 
