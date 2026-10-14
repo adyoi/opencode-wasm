@@ -2,28 +2,8 @@
 import { build } from "esbuild"
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { gzipSync } from "node:zlib"
-
-// esbuild only bundles what it can resolve, but it never reads package.json for
-// a version string. Reading the installed one keeps the version reported by the
-// bridge in sync with the client that actually ends up inside the wasm binary.
-// The package is ESM-only and its `exports` map has no `./package.json` entry,
-// so resolve the public entry point and walk up to the owning manifest.
-function installedClientVersion() {
-  let dir = dirname(fileURLToPath(import.meta.resolve("@opencode/client")))
-  for (;;) {
-    const manifest = join(dir, "package.json")
-    if (existsSync(manifest)) {
-      const pkg = JSON.parse(readFileSync(manifest, "utf8"))
-      if (pkg.name === "@opencode/client") return pkg.version
-    }
-    const parent = dirname(dir)
-    if (parent === dir) throw new Error("could not locate @opencode/client's package.json")
-    dir = parent
-  }
-}
-const clientVersion = installedClientVersion()
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
 const outdir = join(root, "js", "dist")
@@ -37,13 +17,55 @@ const result = await build({
   target: ["es2022"],
   minify: true,
   legalComments: "none",
+  absWorkingDir: root,
+  metafile: true,
+  write: false,
+  logLevel: "warning",
+})
+
+/**
+ * esbuild bundles whatever it resolves but never hands back a package version,
+ * so the version the bridge reports is looked up here. The manifest is found
+ * through esbuild's own metafile rather than `import.meta.resolve` or
+ * `require.resolve`: @opencode/client is ESM-only and its `exports` map exposes
+ * neither a CJS condition nor a "./package.json" entry, so both resolvers throw
+ * on it, and import.meta.resolve also moves between Node versions.
+ */
+function installedClientVersion() {
+  const entry = Object.keys(result.metafile.inputs).find((path) => path.includes(`@opencode${"/"}client`))
+  if (!entry) throw new Error("esbuild did not bundle @opencode/client")
+  let dir = dirname(resolve(root, entry))
+  for (;;) {
+    const manifest = join(dir, "package.json")
+    if (existsSync(manifest)) {
+      const pkg = JSON.parse(readFileSync(manifest, "utf8"))
+      if (pkg.name === "@opencode/client") return pkg.version
+    }
+    const parent = dirname(dir)
+    if (parent === dir) throw new Error("could not locate @opencode/client's package.json")
+    dir = parent
+  }
+}
+const clientVersion = installedClientVersion()
+
+// Re-run with the version in place; the metafile walk above needs a first pass
+// to locate the manifest, and the define must be known before minifying.
+const bundled = await build({
+  entryPoints: [join(root, "js", "entry.js")],
+  bundle: true,
+  format: "iife",
+  platform: "browser",
+  target: ["es2022"],
+  minify: true,
+  legalComments: "none",
+  absWorkingDir: root,
   define: { __RUNTIME_VERSION__: JSON.stringify(clientVersion) },
   write: false,
   logLevel: "warning",
 })
 
 const outfile = join(outdir, "runtime.js")
-writeFileSync(outfile, result.outputFiles[0].text, "utf8")
+writeFileSync(outfile, bundled.outputFiles[0].text, "utf8")
 
 const bytes = readFileSync(outfile)
 const kb = (n) => `${(n / 1024).toFixed(1)} KiB`

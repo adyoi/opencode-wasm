@@ -27,6 +27,7 @@ node_modules/
 rust/target/
 tools/
 js/dist/
+_site/
 *.log
 EOF
 fi

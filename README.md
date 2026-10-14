@@ -269,12 +269,19 @@ https://adyoi.github.io/opencode-wasm/web/?server=https://<nama-codespace>-4096.
 Langkah:
 
 1. Codespaces → New codespace di repo ini. `postCreateCommand` menjalankan
-   `.devcontainer/setup.sh`: pasang opencode, patch versi, tulis config.
+   `.devcontainer/setup.sh`: pasang `opencode-ai@latest`, tulis config ke
+   `~/.config/opencode/opencode.json`. Codespaces masih kosong jadi tidak ada
+   benturan dengan database opencode yang sudah ada.
 2. Jalankan servernya (dicetak di akhir setup):
    ```bash
    tools/opencode-dev/node_modules/opencode-ai/bin/opencode serve \
      --hostname 0.0.0.0 --port 4096 --cors https://adyoi.github.io
    ```
+
+   > Kalau menjalankan server di mesin yang **sudah** punya opencode versi lain,
+   > arahkan `XDG_DATA_HOME` ke folder kosong lebih dulu — server menolak start
+   > kalau `~/.local/share/opencode/opencode.db` ada tapi skemanya bukan milik
+   > versi ini (`Database is not empty and has no session table`).
 3. Di panel **PORTS**, set port 4096 visibility ke **Public**.
 4. Buka URL forwarded dengan `?server=`.
 

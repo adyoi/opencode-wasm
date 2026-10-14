@@ -9,4 +9,8 @@ js/dist/
 # GitHub Pages publishes this repository from the main branch. Rebuild them with
 # `npm run build` whenever js/entry.js, web/app.js or web/index.html changes.
 
+# Staging directory the Deploy Pages workflow composes before uploading. It is
+# a copy of tracked files, so committing it would only add noise.
+_site/
+
 *.log

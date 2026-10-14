@@ -22,19 +22,35 @@ BIN="tools/opencode-dev/node_modules/opencode-ai/bin/opencode"
 "$BIN" --version
 
 echo "==> 2/2  write the demo config"
-mkdir -p tools/xdg-config/opencode
-node scripts/config-demo.mjs http://127.0.0.1:4096 tools/xdg-config/opencode/opencode.json || {
-  echo "  (server belum jalan — config akan dibuat ulang nanti oleh config-demo.mjs)"
+# Written inline rather than through config-demo.mjs: that script reads the live
+# server, and nothing is listening yet during postCreateCommand. Once the server
+# is up, `node scripts/config-demo.mjs http://127.0.0.1:4096 <path>` regenerates
+# it from what the server actually reports.
+#
+# It goes to the standard location so the server needs no environment variables.
+# A machine that already runs opencode against a newer schema should point
+# XDG_DATA_HOME at an empty directory instead: the server refuses to start when
+# ~/.local/share/opencode/opencode.db exists but has no session table.
+mkdir -p ~/.config/opencode
+cat > ~/.config/opencode/opencode.json <<'JSON'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/space-bunny-free",
+  "permission": "allow"
 }
+JSON
 
-echo
-echo "Selesai. Jalankan server dengan:"
-echo
-echo '  "$PWD/'"$BIN"'" serve \'
-echo '    --hostname 0.0.0.0 --port 4096 \'
-echo '    --cors https://adyoi.github.io'
-echo
-echo "Lalu buka Ports di Codespace, set port 4096 visibility ke Public, dan pakai URL:"
-echo "  https://<nama-codespace>-4096.app.github.dev"
-echo
-echo "  https://adyoi.github.io/opencode-wasm/web/?server=https://<nama-codespace>-4096.app.github.dev"
+cat <<EOF
+
+Selesai. Jalankan server dengan:
+
+  "$PWD/$BIN" serve \\
+    --hostname 0.0.0.0 --port 4096 \\
+    --cors https://adyoi.github.io
+
+Lalu buka Ports di Codespace, set port 4096 visibility ke Public, dan pakai URL:
+  https://<nama-codespace>-4096.app.github.dev
+
+  https://adyoi.github.io/opencode-wasm/web/?server=https://<nama-codespace>-4096.app.github.dev
+
+EOF
