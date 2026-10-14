@@ -297,6 +297,11 @@
       .blocked .hint { color: var(--faint); font-size: 12.5px; max-width: 52ch; margin: 4px 0 0; }
       .blocked b { color: var(--muted); font-weight: 600; }
 
+      /* Loading indicator, pinned to the right so the bar does not reflow. */
+      #webStatus { width: 62px; flex: 0 0 auto; font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+      #webStatus:empty { display: none; }
+      .nav button:disabled { opacity: .3; }
+
       .nav {
         display: flex;
         gap: 2px;
@@ -482,14 +487,16 @@
       <div class="status" id="shellStatus"><i class="dot"></i><span id="shellStatusText">belum jalan</span></div>
     </div>
 
-    <div class="webbar">
+    <div class="webbar" id="webbar">
       <div class="nav">
-        <button id="webBack" title="kembali">←</button>
-        <button id="webFwd" title="maju">→</button>
-        <button id="webReload" title="muat ulang">⟳</button>
+        <button id="webBack" title="kembali (Alt+←)">←</button>
+        <button id="webFwd" title="maju (Alt+→)">→</button>
+        <button id="webReload" title="muat ulang (Alt+R)">⟳</button>
+        <button id="webHome" title="halaman awal">⌂</button>
       </div>
-      <input id="webUrl" placeholder="https://…" spellcheck="false" />
+      <input id="webUrl" placeholder="https://… atau cari" spellcheck="false" autocomplete="off" />
       <button id="webGo" class="primary">Go</button>
+      <span id="webStatus" class="status"></span>
     </div>
 
     <main id="main" role="tabpanel" aria-label="Panel demo">
@@ -528,6 +535,6 @@
       </div>
     </footer>
 
-    <script type="module" src="./app.js?v=a4a463ed"></script>
+    <script type="module" src="./app.js?v=71aba771"></script>
   </body>
 </html>

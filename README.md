@@ -31,7 +31,7 @@ Yang bisa dilakukan: **menaruh runtime resmi opencode di dalam binary wasm**. Ha
 | **Pemilih** | satu dropdown: grup **Agent** (default · server, build, plan, general, explore) di atas model gratis opencode per provider, default diambil dari config server |
 | **Auto-allow** | balas otomatis permintaan izin (`permission.v2.asked`) → `always`, atau kartu izin manual |
 | **Shell** | PTY asli di server, dirender xterm.js, I/O lewat wasm |
-| **Web tools** | `webfetch` + `websearch` milik opencode, plus panel browser dengan tombol buka |
+| **Web tools** | `webfetch` + `websearch` milik opencode, plus panel browser dengan riwayat, stop/reload, dan pencarian |
 | **Single file** | `dist/opencode-standalone.html`, jalan dari `file://` |
 
 ![shell](docs/screenshot-shell.png)
@@ -378,6 +378,27 @@ dan `localStorage` yang sudah berisi `provider/id` dari versi lama tetap terbaca
 > `compaction`, `summary`, dan `title` disembunyikan dari picker — itu agent internal
 > pipeline, bukan pilihan pengguna. Agent yang menandai dirinya `hidden` juga ikut
 > dihormati, dan server tanpa route `/agent` tetap jalan dengan picker model saja.
+
+## Panel Web
+
+Satu iframe dengan baris alamat seperti browser:
+
+```
+[ ← ] [ → ] [ ⟳/✕ ] [ ⌂ ]   alamat…                    [ Go ]
+```
+
+- **Alamat pintar** — `example.com` jadi `https://`, tapi `localhost:3000`,
+  `127.0.0.1:…`, `*.local`, dan alamat IP jadi `http://`. Teks tanpa titik
+  (`apa itu wasm`) dianggap pencarian dan dibuka di DuckDuckGo.
+- **Riwayat** — mundur/maju, tombolnya mati sendiri di ujungnya. Iframe
+  lintas-origin tidak memberi tahu kalau navigasi di dalamnya berubah, jadi
+  riwayatnya hanya berisi alamat yang dibuka dari panel ini.
+- **⟳ / ✕** — satu tombol dua pekerjaan: hentikan saat halaman masih memuat,
+  muat ulang setelah selesai. Memuat ulang memaksa `src` lewat `about:blank`,
+  karena menugaskan nilai yang sama tidak memicu muat ulang.
+- **⌂** — kembali ke layar awal dan mengosongkan riwayat.
+- **Alt+← / Alt+→ / Alt+R**, dan klik kolom alamat memilih semua teksnya.
+- URL terakhir disimpan di `localStorage` dan dibuka lagi di kunjungan berikutnya.
 
 ## Batasan
 

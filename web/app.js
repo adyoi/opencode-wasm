@@ -359,12 +359,43 @@
 
       const history = []
       let historyIndex = -1
+      let webLoading = false
 
+      /** Hosts that are almost always plain http; https:// on them just fails. */
+      const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)$|^\d{1,3}(\.\d{1,3}){3}$|\.local$/
+      /** Anything without a dot reads as a search phrase, not as a hostname. */
+      const LOOKS_LIKE_HOST = /[.:]|^[a-z]+:\/\//i
+      const SEARCH_URL = (q) => `https://duckduckgo.com/html/?q=${encodeURIComponent(q)}`
+
+      /** Hostname of a schemeless "host:port/path" string, without the port. */
+      function hostOfTarget(text) {
+        const authority = text.split(/[/?#]/)[0]
+        const afterUser = authority.includes("@") ? authority.slice(authority.lastIndexOf("@") + 1) : authority
+        if (afterUser.startsWith("[")) return afterUser.slice(0, afterUser.indexOf("]") + 1)
+        return afterUser.split(":")[0]
+      }
+
+      /**
+       * Turn whatever is in the address field into a URL, the way a browser
+       * does. This used to prefix everything with https://, which sent
+       * "localhost:3000" to https://localhost:3000 and got a TLS error on a
+       * plain http dev server.
+       */
       const normaliseUrl = (raw) => {
         const text = (raw ?? "").trim()
         if (!text) return "about:blank"
-        if (/^https?:\/\//i.test(text)) return text
-        return `https://${text}`
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text
+        if (/\s/.test(text) || !LOOKS_LIKE_HOST.test(text)) return SEARCH_URL(text)
+        return `${LOCAL_HOST.test(hostOfTarget(text)) ? "http" : "https"}://${text}`
+      }
+
+      /** Reflect the current position in the history in the nav buttons. */
+      function syncWebNav() {
+        $("webBack").disabled = historyIndex <= 0
+        $("webFwd").disabled = historyIndex < 0 || historyIndex >= history.length - 1
+        $("webReload").textContent = webLoading ? "✕" : "⟳"
+        $("webReload").title = webLoading ? "hentikan" : "muat ulang"
+        $("webStatus").textContent = webLoading ? "memuat…" : ""
       }
 
       function openInPanel(url, { push = true } = {}) {
@@ -376,7 +407,18 @@
         }
         $("webUrl").value = target
         $("webEmpty").hidden = true
-        $("webview").src = target
+        webLoading = true
+        syncWebNav()
+        try {
+          localStorage.setItem(WEB_URL_KEY, target)
+        } catch {
+          /* remembering the last URL is a nicety */
+        }
+        // Setting src to the value it already holds does not reload, and reload
+        // is what the stop/reload button has to do when nothing changed.
+        const frame = $("webview")
+        if (frame.src === target) frame.src = "about:blank"
+        frame.src = target
       }
 
       function step(delta) {
@@ -384,6 +426,38 @@
         if (next < 0 || next >= history.length) return
         historyIndex = next
         openInPanel(history[next], { push: false })
+      }
+
+      /**
+       * Back to the start screen. Clearing the history is the default because
+       * that is what the Home button means; the stop button keeps it, so an
+       * aborted load can be retried or stepped back out of.
+       */
+      function resetWebPanel({ clearHistory = true } = {}) {
+        $("webview").src = "about:blank"
+        $("webEmpty").hidden = false
+        webLoading = false
+        if (clearHistory) {
+          history.length = 0
+          historyIndex = -1
+        }
+        syncWebNav()
+        $("webUrl").value = ""
+      }
+
+      const WEB_URL_KEY = "opencode-web-url"
+
+      /** Reopen whatever the last visit had loaded. */
+      function restoreWebPanel() {
+        let saved = null
+        try {
+          saved = localStorage.getItem(WEB_URL_KEY)
+        } catch {
+          /* nothing remembered */
+        }
+        if (!saved) return
+        $("webUrl").value = saved
+        openInPanel(saved, { push: true })
       }
 
       /* ---------- tabs ---------- */
@@ -1311,14 +1385,41 @@
 
       $("webBack").onclick = () => step(-1)
       $("webFwd").onclick = () => step(1)
-      $("webReload").onclick = () => openInPanel($("webUrl").value, { push: false })
+      $("webHome").onclick = resetWebPanel
+      // One button, two jobs: stop while the page is loading, reload once it is.
+      $("webReload").onclick = () => {
+        if (webLoading) resetWebPanel({ clearHistory: false })
+        else openInPanel($("webUrl").value, { push: false })
+      }
       $("webGo").onclick = () => openInPanel($("webUrl").value)
       $("webUrl").onkeydown = (e) => {
-        if (e.key === "Enter") openInPanel($("webUrl").value)
+        if (e.key !== "Enter") return
+        e.preventDefault()
+        openInPanel($("webUrl").value)
+      }
+      // Clicking the address selects all of it, the way a browser does, so the
+      // next keystroke replaces instead of appending.
+      $("webUrl").onfocus = (e) => e.target.select()
+      // Alt+Left / Alt+Right for back and forward, matching every other browser.
+      $("webbar").onkeydown = (e) => {
+        if (!e.altKey) return
+        if (e.key === "ArrowLeft") step(-1)
+        else if (e.key === "ArrowRight") step(1)
+        else if (e.key === "r") openInPanel($("webUrl").value, { push: false })
+        else return
+        e.preventDefault()
       }
       for (const button of document.querySelectorAll("#webEmpty [data-url]")) {
         button.onclick = () => openInPanel(button.dataset.url)
       }
+      // A cross-origin frame will not tell us where it navigated to, but it does
+      // say when it finished loading, which is what the stop/reload state needs.
+      $("webview").addEventListener("load", () => {
+        webLoading = false
+        syncWebNav()
+      })
+      syncWebNav()
+      restoreWebPanel()
 
       // Best effort: detach the websocket when the page goes away. This calls the
       // embedded runtime directly instead of queueing a request: by the time
